@@ -4,10 +4,13 @@ export type { ConfigIssue } from './errors.js';
 export { fetchExecutables, MAX_KEYS_PER_REQUEST } from './fetch.js';
 export type { LedgerEntriesSource } from './fetch.js';
 export { hashWasm } from './hash.js';
+export { effectiveStatus, initialState, isWritable, nextState } from './state.js';
 export type {
   ContractConfig,
+  ContractState,
   LiveExecutable,
   NetworkConfig,
+  Status,
   SupportedVersion,
   WasmwardConfig,
 } from './types.js';

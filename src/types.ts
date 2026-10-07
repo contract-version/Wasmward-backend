@@ -37,3 +37,29 @@ export type LiveExecutable =
   | { kind: 'missing'; latestLedger: number }
   | { kind: 'archived'; liveUntilLedger: number; latestLedger: number }
   | { kind: 'error'; message: string };
+
+/** Why a contract is, or is not, safe to write to. Only `supported` allows writes. */
+export type Status =
+  | 'pending'
+  | 'supported'
+  | 'unsupported'
+  | 'stellar-asset'
+  | 'missing'
+  | 'archived'
+  | 'stale';
+
+export interface ContractState {
+  name: string;
+  contractId: string;
+  status: Status;
+  /** Lowercase hex Wasm hash seen on the last successful lookup that found Wasm. */
+  liveWasmHash?: string;
+  /** Label of the supported version the live hash matched, when it has one. */
+  matchedLabel?: string;
+  /** Time of the last lookup, successful or not. */
+  lastCheckedAt?: number;
+  /** Time of the last lookup that completed without error. */
+  lastSuccessAt?: number;
+  lastError?: string;
+  consecutiveErrors: number;
+}
