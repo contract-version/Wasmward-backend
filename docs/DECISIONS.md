@@ -99,3 +99,12 @@ Every deviation from the specification, and every choice the specification left 
 - **Errors after a success follow the spec literally.** Once the last success is older than the limit, the status becomes `stale` whatever it was, including `unsupported` or `missing`. The last seen hash is kept for diagnosis. All of these block writes.
 - **`initialState`.** The spec names `ContractState` but not how one starts. `initialState(name, contract)` creates the `pending` state with no history.
 - **Results that clear fields.** A successful non-Wasm result (`stellar-asset`, `missing`, `archived`) clears `liveWasmHash` and `matchedLabel`, since no Wasm hash was observed. An unsupported hash keeps `liveWasmHash` and clears `matchedLabel`.
+
+## D-010: Poller choices
+
+- **Date:** 2026-10-07
+- **The optional `getLatestLedger` shortcut is not implemented.** The spec allows skipping the entries call when the ledger sequence is unchanged, but only "if tests show it is correct for staleness". It is not: an RPC node that is stuck on one ledger would keep returning the same sequence, the shortcut would keep refreshing `lastSuccessAt`, and a contract would stay `supported` while the guard learns nothing. Every tick therefore does the full lookup.
+- **Scheduling is a `setTimeout` chain that arms the next timer after the current tick finishes.** Two ticks cannot overlap, and a tick that outlasts the interval simply delays the next one (the lookup itself is bounded by its timeout). A stop followed by a start while an old tick is still running waits for that tick, so concurrency stays at one. This replaces the spec's "skip that fire" wording with a structure that makes the skip unnecessary.
+- **The poller only schedules.** It takes a `tick()` function that returns true when every contract's lookup failed. The guard (Phase 5) supplies the tick that fetches, applies `nextState` and fires change callbacks. A tick that rejects counts as a failing tick.
+- **Backoff and jitter.** The wait is `intervalMs` doubled per consecutive failing tick, capped at `maxStalenessMs / 2`, with 0 to 10 percent jitter added on top of the capped value. The real wait can therefore reach 1.1 times the cap. Writes are blocked by the call-time staleness check regardless of when the next tick runs, so this timing only affects how soon state and subscribers update.
+- **Restart.** `start()` after `stop()` begins a fresh schedule with the failure count reset. A second `start()` while running returns the same promise and does nothing.

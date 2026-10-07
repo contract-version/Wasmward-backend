@@ -86,3 +86,22 @@
 
 **Open issues**
 - None.
+
+## Phase 4: Poller
+
+**Date:** 2026-10-07
+
+**Built**
+- `src/poller.ts`: `createPoller({ intervalMs, maxStalenessMs, tick, random? })` returning `{ start, stop }`, and the pure `nextDelayMs` used for scheduling.
+- Immediate first check on `start()`, `setTimeout` chain, 0 to 10 percent jitter, doubling backoff on all-failed ticks capped at `maxStalenessMs / 2`, reset on success, `unref()` on Node timers, `stop()` that waits for an in-flight tick, and a no-op second `start()`.
+
+**Commands run and results**
+- `pnpm typecheck`: pass
+- `pnpm lint`: pass
+- `pnpm test:coverage`: 221 tests pass, 98.6% lines (`poller.ts` 100% lines)
+
+**Exit criteria**
+- Fake-timer tests in `test/unit/poller.test.ts` cover the schedule, jitter bounds, backoff doubling and the cap, reset after success, a throwing tick, no overlap (including a tick longer than the interval and a stop-then-start race), stop during an in-flight tick, stop during the first tick, double start, restart, `unref`, and numeric timer handles.
+
+**Open issues**
+- The `getLatestLedger` optimization was deliberately left out (D-010).
