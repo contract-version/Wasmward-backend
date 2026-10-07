@@ -193,8 +193,7 @@
 - A random valid contract ID was reported `missing` and blocked.
 
 **Open issues**
-- The CI integration job has not yet run on a hosted runner; it will on the next push to main only if a `FIXTURE_SECRET` secret exists, or on manual dispatch.
-- Exit criterion "from a clean clone" is verified here by re-running `deploy.sh`, which generates a fresh identity when none exists; a literal fresh clone on another machine is still to be done.
+- Resolved: the CI integration job has run on a hosted Ubuntu runner from a clean checkout (manual dispatch, 2026-10-07; green). It runs on pushes to main only if a `FIXTURE_SECRET` secret exists, and on manual dispatch.
 
 ## Phase 8: Documentation and release
 
@@ -229,7 +228,7 @@
 **Open issues**
 - Not done, and only the project owner can: claim the `@wasmward` npm scope, add the `NPM_TOKEN` secret, set the date in `CHANGELOG.md`, and push the `v0.1.0` tag, which publishes.
 - The five seed-backlog issues have not been opened (D-014).
-- The CI `npx` step and the CI integration job are new and have not yet run on a hosted runner.
+- Resolved: the CI `npx` step passes on Node 20 and 22, and the CI integration job passes on a hosted runner.
 
 **CI integration run on a hosted runner** (2026-10-07, manual dispatch of the `CI` workflow)
 - The `integration` job installed the Stellar CLI 27.0.0 Linux binary, generated a fresh testnet identity, deployed a new fixture and ran the tests on Ubuntu.
