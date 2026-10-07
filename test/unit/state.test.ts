@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { effectiveStatus, initialState, isWritable, nextState } from '../../src/state.js';
+import { describeBlock, effectiveStatus, initialState, isWritable, nextState } from '../../src/state.js';
 import type { ContractConfig, ContractState, LiveExecutable, Status } from '../../src/types.js';
 import { contractIdOf, hashOf } from '../fixtures/ledger.js';
 
@@ -250,5 +250,63 @@ describe('effectiveStatus and isWritable', () => {
 
   it('never allows writes for a state that has not completed a lookup', () => {
     expect(isWritable(initialState('vault', cfg), NOW, MAX)).toBe(false);
+  });
+});
+
+describe('describeBlock', () => {
+  const describeAt = (state: ContractState, now = NOW) => describeBlock(state, now, MAX);
+
+  it('names the unsupported hash in full', () => {
+    expect(describeAt(stateWith('unsupported', { liveWasmHash: UNKNOWN }))).toBe(`live code ${UNKNOWN} is not in the supported list`);
+  });
+
+  it('copes with an unsupported state that has no hash', () => {
+    const state = stateWith('unsupported');
+    delete state.liveWasmHash;
+    expect(describeAt(state)).toContain('(unknown hash)');
+  });
+
+  it.each([
+    ['stellar-asset', /Stellar Asset Contract/],
+    ['missing', /no contract instance was found/],
+    ['archived', /expired \(archived\)/],
+  ] as const)('explains %s', (status, pattern) => {
+    expect(describeAt(stateWith(status))).toMatch(pattern);
+  });
+
+  it('explains pending, with the last error when there is one', () => {
+    const bare = withoutLastSuccess(stateWith('pending'));
+    delete bare.lastError;
+    expect(describeAt(bare)).toBe('no successful check of the live code has completed yet');
+    expect(describeAt({ ...bare, lastError: 'rpc down' })).toBe(
+      'no successful check of the live code has completed yet; last error: rpc down',
+    );
+  });
+
+  it('explains stale with its age and the last error', () => {
+    const state = stateWith('stale', { lastSuccessAt: NOW - 150_000, lastError: 'timeout' });
+    expect(describeAt(state)).toBe('the last successful check was 150s ago, outside the allowed 120s; last error: timeout');
+  });
+
+  it('explains a stored supported state that has gone stale with time', () => {
+    const state = stateWith('supported', { lastSuccessAt: NOW - 200_000 });
+    delete state.lastError;
+    expect(describeAt(state)).toBe('the last successful check was 200s ago, outside the allowed 120s');
+  });
+
+  it('says a backwards clock cannot be dated', () => {
+    const state = stateWith('supported', { lastSuccessAt: NOW + 5_000 });
+    delete state.lastError;
+    expect(describeAt(state)).toContain('cannot be dated');
+  });
+
+  it('says so for a stale state with no recorded success', () => {
+    const state = withoutLastSuccess(stateWith('stale'));
+    delete state.lastError;
+    expect(describeAt(state)).toContain('cannot be dated');
+  });
+
+  it('says the live code is supported when it is', () => {
+    expect(describeAt(stateWith('supported', { lastSuccessAt: NOW }))).toBe('the live code is supported');
   });
 });
