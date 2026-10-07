@@ -108,3 +108,22 @@ Every deviation from the specification, and every choice the specification left 
 - **The poller only schedules.** It takes a `tick()` function that returns true when every contract's lookup failed. The guard (Phase 5) supplies the tick that fetches, applies `nextState` and fires change callbacks. A tick that rejects counts as a failing tick.
 - **Backoff and jitter.** The wait is `intervalMs` doubled per consecutive failing tick, capped at `maxStalenessMs / 2`, with 0 to 10 percent jitter added on top of the capped value. The real wait can therefore reach 1.1 times the cap. Writes are blocked by the call-time staleness check regardless of when the next tick runs, so this timing only affects how soon state and subscribers update.
 - **Restart.** `start()` after `stop()` begins a fresh schedule with the failure count reset. A second `start()` while running returns the same promise and does nothing.
+
+## D-011: Guard and health choices
+
+- **Date:** 2026-10-07
+- **The config is validated again** inside `createVersionGuard`. `loadConfig` is idempotent on its own output, so a hand-built or edited object cannot bypass the schema rules.
+- **Narrow server type.** `createVersionGuard` takes a `GuardServer` (`getNetwork` and `getLedgerEntries`) rather than the whole `rpc.Server`, so tests can pass a fake chain. `rpc.Server` satisfies it. With no server given, the guard builds one and allows plain http only when the config URL is http, which the config schema already limits to localhost.
+- **Start and the network check.** A passphrase mismatch throws `ConfigError` and starts nothing (spec). If the network cannot be reached at all, the spec is silent; `start()` rejects with an `Error` (the original is its `cause`) and starts nothing, because contracts cannot be called `supported` on an unverified network. A failed start can simply be retried. `start()` is idempotent while in flight, `stop()` cancels a start that is still verifying the network, and a restart does not repeat a verification that succeeded.
+- **Nothing is writable before the network is verified.** `isWritable`, `assertWritable` and `assertWritableFresh` all require a completed `start()`.
+- **Lookup timeout.** The spec gives none. A lookup waits `min(pollIntervalMs, 10s)`, so a hung request can never outlast the polling interval.
+- **Freshness is dated from when the lookup began**, not when it ended, so a slow response never looks fresher than it is. Errors are judged against the current time so staleness is noticed as soon as it is real.
+- **An older lookup cannot overwrite a newer one.** If a slow poll finishes after a fresh check has already seen an upgrade, the late result is dropped. Otherwise a stale `supported` could replace the correct `unsupported` until the next poll. This is tested.
+- **`assertWritableFresh` fails closed.** The spec says it "runs one immediate lookup, then asserts". If that lookup errors, the stored state may still be fresh and supported; asserting on it would defeat the purpose, so the call throws `WriteBlockedError` with the lookup error in the reason.
+- **Subscribers see transitions of the effective status.** Each contract remembers the last status it announced, so a change is reported once. Becoming `stale` through time alone, with no check completing, is not pushed; `status()`, `isWritable()` and `health()` still report it.
+- **Listener errors are swallowed silently**, as the spec requires ("caught and do not stop the poller"). There is no error hook; adding one would be an option the spec does not list.
+- **`status()` applies staleness to the status** and returns copies, so a stopped poller shows `stale` and callers cannot mutate guard state.
+- **Health output.** `HealthReport` adds `network.verified`, and `ok` requires it. The RPC URL is omitted because providers often embed API keys in it and health endpoints are commonly exposed. Report fields with no value are left out rather than set to `undefined`, so the output is plain JSON.
+- **Wrapper details.** `guard.guard` always returns a promise, so a block surfaces as a rejection. Unknown names throw `ConfigError` when the wrapper is created. It uses local functions rather than `this`, so it works when detached from the guard object.
+- **Contract lookup uses a `Map`** so names such as `constructor` are never matched through object inheritance. Tests cover `constructor`, `toString` and `__proto__`.
+- **`WriteBlockedError` message** prints the full 64-character hash, not a shortened one, so it can be pasted into the config.

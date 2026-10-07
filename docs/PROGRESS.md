@@ -105,3 +105,30 @@
 
 **Open issues**
 - The `getLatestLedger` optimization was deliberately left out (D-010).
+
+## Phase 5: Public API and health
+
+**Date:** 2026-10-07
+
+**Built**
+- `src/guard.ts`: `createVersionGuard` with `start`, `stop`, `status`, `isWritable`, `assertWritable`, `assertWritableFresh`, `subscribe`, `guard` and `health`.
+- `src/health.ts`: `buildHealth` and the `HealthReport` type.
+- `WriteBlockedError` in `src/errors.ts`; `describeBlock` in `src/state.ts` for the reason text.
+- `docs/API.md` documents every export.
+
+**Commands run and results**
+- `pnpm typecheck`: pass
+- `pnpm lint`: pass
+- `pnpm test:coverage`: 288 tests pass, 99.1% lines
+
+**Exit criteria**
+- Network mismatch at start (no polling, nothing writable): tested.
+- Subscribe fires once per transition: tested (supported, unsupported, supported again, plus stale).
+- Wrapper blocks and passes through return values and errors: tested, including sync functions, detached use and `fresh: true`.
+- Fresh assert performs exactly one lookup: tested.
+- Health output shape: tested, including a JSON round trip and absence of the RPC URL.
+- A stopped poller cannot leave a contract writable past `maxStalenessMs`: tested.
+- A race found and fixed while writing the tests: two concurrent `start()` calls each verified the network. `start()` is now idempotent while in flight.
+
+**Open issues**
+- `docs/OPERATIONS.md` (health endpoint examples for Express and Next.js) is written in Phase 8.
