@@ -1,0 +1,30 @@
+{
+  "recordedAt": "2026-10-07T14:20:26.889Z",
+  "contractId": "CBR5ZFDI2GBXG66DAEWWHSAK4NDLKSKHWVUEUSOM4UOBM66TI6DYPDPV",
+  "expectedWasmHash": "a7a82511fa284650178b02fe3a4bafc587b95212f2f8ce647f2df5ef4cf42509",
+  "getLedgerEntries": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "entries": [
+        {
+          "key": "AAAABgAAAAFj3JRo0YNze8MBLWPICuNGtUlHtWhKSczlHBZ700eHhwAAABQAAAAB",
+          "xdr": "AAAABgAAAAAAAAABY9yUaNGDc3vDAS1jyArjRrVJR7VoSknM5RwWe9NHh4cAAAAUAAAAAQAAABMAAAAAp6glEfooRlAXiwL+OkuvxYe5UhLy+M5kfy3170z0JQkAAAABAAAAAQAAABAAAAABAAAAAQAAAA8AAAAFQWRtaW4AAAAAAAASAAAAAAAAAAAlaMSs3Hv+wQ4XPOYZLcD+zoKOC8Ue7eKJWXcJRb5gjw==",
+          "lastModifiedLedgerSeq": 5071838,
+          "liveUntilLedgerSeq": 5192739,
+          "extXdr": "AAAAAA=="
+        }
+      ],
+      "latestLedger": 5071843
+    }
+  },
+  "getNetwork": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "friendbotUrl": "https://friendbot.stellar.org/",
+      "passphrase": "Test SDF Network ; September 2015",
+      "protocolVersion": 29
+    }
+  }
+}
