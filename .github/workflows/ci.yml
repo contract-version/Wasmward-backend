@@ -27,6 +27,11 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
       - run: pnpm test:coverage
+      - name: Check the packed CLI runs through npx
+        run: |
+          npm pack --silent --ignore-scripts
+          npx --yes --package "./$(ls wasmward-core-*.tgz)" wasmward hash README.md
+          npx --yes --package "./$(ls wasmward-core-*.tgz)" wasmward --help
 
   integration:
     # Testnet integration: always on manual dispatch, and on main only when a FIXTURE_SECRET secret exists
