@@ -16,6 +16,14 @@ Things to weigh:
 - **Backoff.** When every lookup in a poll fails, the wait doubles each time, up to half of `maxStalenessMs`, so recovery is noticed promptly.
 - **Use a dedicated RPC URL you trust.** The guard believes what the RPC says. Do not put an RPC URL that contains an API key in client-side code.
 
+## Which hash to put in the config
+
+Use the hash of the artifact that is actually deployed, not of a rebuild. The same source code can build to different Wasm on different machines and toolchains: while testing Wasmward, the fixture contract built on Windows and on a Linux CI runner produced different hashes for identical source. A hash you compute from your own rebuild will not match the contract on chain.
+
+- Take the hash from the file you uploaded, or from the upload step (`stellar contract upload` prints it), and add that one.
+- `npx wasmward hash <file.wasm>` computes the same value Stellar assigns on upload.
+- If you need two machines to agree, make the build reproducible, or build once in CI and pass the artifact on.
+
 ## Upgrading a contract safely
 
 The order matters. A contract that is upgraded before your apps know the new hash will have its writes blocked until they do.
