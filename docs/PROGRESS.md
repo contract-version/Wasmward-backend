@@ -44,3 +44,25 @@
 
 **Open issues**
 - `src/cli.ts` is still a placeholder and shows 0% in the coverage report; Phase 6 replaces it.
+
+## Phase 2: Live executable lookup
+
+**Date:** 2026-10-07
+
+**Built**
+- `src/fetch.ts`: `fetchExecutables(source, contractIds, timeoutMs)` returns a map with an entry for every requested contract: `wasm`, `stellar-asset`, `missing`, `archived` or `error`.
+- Builds the persistent `scvLedgerKeyContractInstance` key per contract, batches into one call (chunks of 200), matches entries by key XDR, applies the timeout, and never throws.
+- `LiveExecutable` added to `src/types.ts`.
+
+**Commands run and results**
+- `pnpm typecheck`: pass
+- `pnpm lint`: pass
+- `pnpm test:coverage`: 107 tests pass, 97.9% lines
+
+**Exit criteria**
+- Each kind, mixed batch, out-of-order entries, chunking and timeout are covered in `test/unit/fetch.test.ts`.
+- The same cases run through the real `rpc.Server` against a local HTTP server in `test/replay/fetch.test.ts`, including HTTP 500, a JSON-RPC error, malformed JSON, a hung server and a closed port.
+- Pending: replays of responses recorded from testnet (Phase 7).
+
+**Open issues**
+- The two uncovered lines in `fetch.ts` are the exhaustiveness guard for a future SDK executable variant; the compiler makes it unreachable.

@@ -75,3 +75,16 @@ Every deviation from the specification, and every choice the specification left 
 - **Byte order mark.** `loadConfigFile` strips a leading UTF-8 byte order mark before parsing, because Windows editors and PowerShell commonly write one and `JSON.parse` rejects it.
 - **Dependent rules wait for independent ones.** zod skips a cross-field rule (duplicate hashes, `maxStalenessMs` against `pollIntervalMs`) while the fields it compares are themselves invalid. A user with several mistakes may therefore see them over two runs. Each run still lists every issue it can evaluate.
 - **Contract-name errors.** zod 4 reports a bad record key as a generic "Invalid key in record". `loadConfig` rewrites that issue to `contract name must match <regex>`.
+
+## D-008: Live executable lookup choices
+
+- **Date:** 2026-10-07
+- **Key limit:** The Stellar RPC docs state a maximum of 200 keys per `getLedgerEntries` request. `MAX_KEYS_PER_REQUEST` is 200. Larger sets are split into chunks that run in parallel. A failing chunk marks only its own contracts as `error`.
+- **Narrow server type:** `fetchExecutables` takes `LedgerEntriesSource` (just `getLedgerEntries(...keys)`) instead of the whole `rpc.Server`. `rpc.Server` satisfies it, and tests can pass a stub.
+- **Absent keys mean missing.** The docs do not say what happens for keys that do not exist. Entries for them are not returned, and Wasmward reports `missing`.
+- **Archived instances may look missing.** The spec marks an instance `archived` when `liveUntilLedgerSeq < latestLedger`. A live-state RPC may omit expired entries entirely, in which case the contract is reported `missing`. Both statuses block writes, so the outcome is safe either way. Only the label differs.
+- **No TTL, no trust.** A Wasm instance returned without `liveUntilLedgerSeq` is reported as `error`, because archival cannot be ruled out. A Stellar Asset Contract without a TTL is still `stellar-asset`, since that status never allows writes anyway.
+- **Invalid contract IDs.** An ID that cannot be turned into a key yields `error` for that contract only. The rest of the batch is still looked up.
+- **Duplicates.** A contract ID passed twice is requested once. If the RPC returns the same key twice, the first entry wins. Entries for keys that were not requested are ignored.
+- **Error text.** The RPC client rejects with plain `{ code, message }` objects for JSON-RPC errors. `messageOf` reads the `message` field so errors are readable rather than `[object Object]`. A replay test found this.
+- **Replay tests.** Wire-format responses are generated with the SDK's own XDR builders and served over local HTTP, so the real `rpc.Server` parsing is exercised. Responses recorded from testnet are added in Phase 7.
