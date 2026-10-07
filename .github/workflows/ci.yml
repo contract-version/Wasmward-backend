@@ -29,18 +29,54 @@ jobs:
       - run: pnpm test:coverage
 
   integration:
+    # Testnet integration: always on manual dispatch, and on main only when a FIXTURE_SECRET secret exists
+    # (without one, every push would ask friendbot to fund a new account).
     if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     needs: test
     runs-on: ubuntu-latest
+    env:
+      STELLAR_CLI_VERSION: 27.0.0
+      FIXTURE_SECRET: ${{ secrets.FIXTURE_SECRET }}
+      WASMWARD_FIXTURE_DIR: ${{ github.workspace }}/Wasmward-contract
     steps:
+      - name: Decide whether to run
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ -n "${FIXTURE_SECRET}" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping testnet integration: no FIXTURE_SECRET secret on this push."
+          fi
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+      - name: Check out the fixture contract
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: contract-version/Wasmward-contract
+          path: Wasmward-contract
       - uses: pnpm/action-setup@v4
+        if: steps.gate.outputs.run == 'true'
       - uses: actions/setup-node@v4
+        if: steps.gate.outputs.run == 'true'
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: pnpm test:integration
-        env:
-          FIXTURE_SECRET: ${{ secrets.FIXTURE_SECRET }}
+      - name: Install the Stellar CLI and the Wasm target
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/stellar"
+          curl -sSfL "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz" | tar xz -C "$RUNNER_TEMP/stellar"
+          echo "$RUNNER_TEMP/stellar" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/stellar/stellar" --version
+          rustup target add wasm32v1-none
+      - name: Deploy the fixture to testnet
+        if: steps.gate.outputs.run == 'true'
+        working-directory: Wasmward-contract
+        run: bash scripts/deploy.sh
+      - name: Run the integration tests
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm test:integration
