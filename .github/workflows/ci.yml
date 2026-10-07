@@ -84,4 +84,5 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: |
           pnpm install --frozen-lockfile
+          pnpm build
           pnpm test:integration
