@@ -1,0 +1,108 @@
+# Wasmward
+
+A runtime guard for Soroban contract upgrades. A contract can be upgraded in place, so an app that still encodes calls for the old interface may see its writes fail, or worse, succeed with the wrong meaning. Wasmward checks which Wasm code a contract is running on the network, compares its hash with the hashes your app supports, and blocks writes whenever the code is unknown, cannot be verified, or the check is stale. It is small enough to run in a backend or a browser, and it fails closed.
+
+Tools such as [soroban-upgrade-safeguard](https://github.com/ShippedLabs/soroban-upgrade-safeguard) compare builds *before* an upgrade is deployed. Wasmward is the other half: it runs in your app *after* the upgrade, whoever made it.
+
+> **Status:** version 0.1.0, not yet published to npm. Until it is, install from a clone of this repository.
+
+## Install
+
+```bash
+npm install @wasmward/core @stellar/stellar-sdk
+```
+
+`@stellar/stellar-sdk` (17.2.1 or a later 17.x) is a peer dependency. Node.js 20 and 22 are supported, and the library has no Node-only code outside `@wasmward/core/node`.
+
+## Use
+
+This example guards the test contract Wasmward uses in its own tests, on Stellar testnet. It runs as written with Node 20 or later (save it as `example.mjs`):
+
+```js
+import { createVersionGuard, loadConfig } from '@wasmward/core';
+
+// The hashes of the Wasm builds this app knows how to talk to.
+const config = loadConfig({
+  version: 1,
+  network: {
+    rpcUrl: 'https://soroban-testnet.stellar.org',
+    passphrase: 'Test SDF Network ; September 2015',
+  },
+  contracts: {
+    vault: {
+      contractId: 'CBR5ZFDI2GBXG66DAEWWHSAK4NDLKSKHWVUEUSOM4UOBM66TI6DYPDPV',
+      supported: [
+        {
+          wasmHash: 'a7a82511fa284650178b02fe3a4bafc587b95212f2f8ce647f2df5ef4cf42509',
+          label: 'v1',
+        },
+      ],
+    },
+  },
+});
+
+const guard = createVersionGuard(config);
+
+// Called whenever a contract's status changes, including the first check.
+guard.subscribe((change) => {
+  console.log(`${change.name}: ${change.from} -> ${change.to}`);
+});
+
+await guard.start(); // checks the network, looks up the live code, then keeps checking
+
+// Wrap a write so it is refused while the live code is not supported.
+const deposit = guard.guard('vault', async (amount) => `would deposit ${amount}`);
+
+try {
+  console.log(await deposit(10));
+} catch (error) {
+  console.log(error.message); // Writes to 'vault' are blocked: ...
+}
+
+console.log(guard.health());
+await guard.stop();
+```
+
+If the test contract has expired, the example prints why writes are blocked instead of failing.
+
+In a browser, use `loadConfig` and `guard.subscribe` directly. `loadConfigFile` lives in `@wasmward/core/node`, so browser bundles never import `fs`.
+
+## Command line
+
+```bash
+npx wasmward hash build/contract.wasm                    # print a Wasm file's SHA-256
+npx wasmward add vault build/contract.wasm --label v2    # add it to wasmward.json
+npx wasmward check                                       # exit 0 only if every contract is supported
+```
+
+`check` is meant for a deploy pipeline: run it before releasing an app build to confirm the build's config matches the live contracts. Exit code 0 means all supported, 1 means at least one is not, 2 means invalid input or the network could not be checked. Add `--json` for machine-readable output.
+
+## API overview
+
+| | |
+|---|---|
+| `loadConfig(object)` | Validate a config and apply defaults. `loadConfigFile(path)` is in `@wasmward/core/node`. |
+| `hashWasm(bytes)` | SHA-256 of Wasm bytes, equal to the hash Stellar assigns on upload. |
+| `createVersionGuard(config)` | The guard: `start`, `stop`, `status`, `isWritable`, `assertWritable`, `assertWritableFresh`, `guard`, `subscribe`, `health`. |
+| `WriteBlockedError`, `ConfigError` | What the guard throws. |
+
+Only the `supported` status allows writes. See [docs/API.md](docs/API.md) for every export.
+
+## What it does not do
+
+- It does not stop a write in the moment between an upgrade and the next check. Use `assertWritableFresh` for high-value writes, and simulate transactions before submitting them. [docs/OPERATIONS.md](docs/OPERATIONS.md) explains the limits.
+- It does not analyse whether two builds are compatible. That is a decision you make by adding a hash to your config.
+- It does not send alerts. Use `guard.subscribe` to wire your own.
+
+## Documentation
+
+- [API reference](docs/API.md)
+- [Operations guide](docs/OPERATIONS.md): recommended settings, upgrade order, health endpoints, limits
+- [Decisions](docs/DECISIONS.md) and [progress log](docs/PROGRESS.md)
+- [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), [Changelog](CHANGELOG.md)
+
+The test contract and its testnet deploy script live in [Wasmward-contract](https://github.com/contract-version/Wasmward-contract).
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).
