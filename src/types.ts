@@ -28,3 +28,12 @@ export interface WasmwardConfig {
   /** Keyed by contract name. Names match `^[a-z0-9][a-z0-9-_]{0,63}$`. */
   contracts: Record<string, ContractConfig>;
 }
+
+/** What a contract instance is running right now, or why that could not be determined. */
+export type LiveExecutable =
+  | { kind: 'wasm'; wasmHash: string; liveUntilLedger: number; latestLedger: number }
+  | { kind: 'stellar-asset'; latestLedger: number }
+  /** No instance entry was found. The contract does not exist on this network. */
+  | { kind: 'missing'; latestLedger: number }
+  | { kind: 'archived'; liveUntilLedger: number; latestLedger: number }
+  | { kind: 'error'; message: string };
