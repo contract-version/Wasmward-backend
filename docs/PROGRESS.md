@@ -195,3 +195,38 @@
 **Open issues**
 - The CI integration job has not yet run on a hosted runner; it will on the next push to main only if a `FIXTURE_SECRET` secret exists, or on manual dispatch.
 - Exit criterion "from a clean clone" is verified here by re-running `deploy.sh`, which generates a fresh identity when none exists; a literal fresh clone on another machine is still to be done.
+
+## Phase 8: Documentation and release
+
+**Date:** 2026-10-07
+
+**Built**
+- `README.md` (problem statement, install, a usage example that runs as written, CLI, API overview, links, license), `docs/API.md`, `docs/OPERATIONS.md` (recommended settings, upgrade order, deploy-pipeline use of `check`, limits, status guide, Express and Next.js health endpoints, alerts, frontends).
+- `CONTRIBUTING.md` (with a Stellar Wave section), `SECURITY.md`, `CHANGELOG.md`, issue templates for bugs and features (each with acceptance criteria and files-touched fields), and a pull request template. `LICENSE` is Apache-2.0.
+- Package metadata for 0.1.0 and a tag-triggered release workflow with npm provenance.
+- Tests for the browser bundle, the package contents, and the README example.
+
+**QA checklist (spec section 7.2)**
+
+| Item | Result |
+|---|---|
+| Fresh clone: install, build and unit tests pass | See "Fresh clone" below. |
+| Integration tests pass on testnet, including the real upgrade | Pass. Run repeatedly; each run restores the contract to v1. |
+| `supported` is the only status for which `isWritable` returns true | Pass. A grep of `src` shows `isWritable` is defined once, as `effectiveStatus(...) === 'supported'` (`state.ts`), and the health `writable` flag uses the same comparison (`health.ts`). Tests enumerate all seven statuses. |
+| A stopped poller cannot leave a contract writable past `maxStalenessMs` | Pass. Tests in `test/unit/state.test.ts` and `test/unit/guard.test.ts` ("blocks writes once a stopped poller leaves the last success too old"). |
+| Network passphrase mismatch prevents start | Pass. `test/unit/guard.test.ts`, and for the CLI `check`. |
+| Main entry bundles for a browser without `fs` or `path` | Pass. `test/unit/browser-bundle.test.ts`, with controls. |
+| `npm pack` contains only dist, README.md, LICENSE, package.json | Pass. `test/unit/package.test.ts`. |
+| CLI works via `npx` from the packed tarball | Locally: the extracted tarball ran (`hash`, `--help`, and `check`, which loads the lazy chunks). Real `npx` is a CI step that runs on the next push. |
+| README examples run as written | Pass, against live testnet. `test/integration/readme.test.ts`. |
+| PROGRESS covers every phase, DECISIONS lists every deviation | Done (this file and `docs/DECISIONS.md`, D-001 to D-014). |
+
+**Commands run and results**
+- `pnpm typecheck`, `pnpm lint`, `pnpm build`: pass.
+- `pnpm test:coverage`: all unit, replay, CLI and packaging tests pass; line coverage above the 90% gate.
+- `pnpm test:integration`: testnet upgrade flow and the README example pass.
+
+**Open issues**
+- Not done, and only the project owner can: claim the `@wasmward` npm scope, add the `NPM_TOKEN` secret, set the date in `CHANGELOG.md`, and push the `v0.1.0` tag, which publishes.
+- The five seed-backlog issues have not been opened (D-014).
+- The CI `npx` step and the CI integration job are new and have not yet run on a hosted runner.
