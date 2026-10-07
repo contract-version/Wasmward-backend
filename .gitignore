@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+*.tgz
+.env
+.env.local
+fixtures/testnet.json
+.DS_Store
