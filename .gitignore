@@ -6,3 +6,4 @@ coverage/
 .env.local
 fixtures/testnet.json
 .DS_Store
+Wasmward-contract/
