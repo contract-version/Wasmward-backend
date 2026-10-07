@@ -80,3 +80,35 @@ export function nextState(
       return next;
   }
 }
+
+function seconds(ms: number): string {
+  return `${Math.round(ms / 1000)}s`;
+}
+
+/**
+ * A sentence fragment explaining the contract's status at `now`, for error messages.
+ * For a status that allows writes it says so; callers only use it for blocked statuses.
+ */
+export function describeBlock(state: ContractState, now: number, maxStalenessMs: number): string {
+  const status = effectiveStatus(state, now, maxStalenessMs);
+  const lastError = state.lastError === undefined ? '' : `; last error: ${state.lastError}`;
+  switch (status) {
+    case 'supported':
+      return 'the live code is supported';
+    case 'pending':
+      return `no successful check of the live code has completed yet${lastError}`;
+    case 'unsupported':
+      return `live code ${state.liveWasmHash ?? '(unknown hash)'} is not in the supported list`;
+    case 'stellar-asset':
+      return 'the contract is a Stellar Asset Contract, which Wasmward does not guard';
+    case 'missing':
+      return 'no contract instance was found on this network';
+    case 'archived':
+      return 'the contract instance has expired (archived) and must be restored first';
+    case 'stale': {
+      const age = state.lastSuccessAt === undefined ? undefined : now - state.lastSuccessAt;
+      const when = age !== undefined && age >= 0 ? `was ${seconds(age)} ago` : 'cannot be dated';
+      return `the last successful check ${when}, outside the allowed ${seconds(maxStalenessMs)}${lastError}`;
+    }
+  }
+}
