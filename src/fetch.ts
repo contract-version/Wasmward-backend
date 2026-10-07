@@ -40,10 +40,11 @@ function toHex(bytes: Uint8Array): string {
   return hex;
 }
 
-function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+/** Rejects with `<label> timed out after <n>ms` if `work` has not settled in time. */
+export function withTimeout<T>(work: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error(`getLedgerEntries timed out after ${timeoutMs}ms`));
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     work.then(
       (value) => {
@@ -108,7 +109,7 @@ async function fetchChunk(
 ): Promise<void> {
   let response: rpc.Api.GetLedgerEntriesResponse;
   try {
-    response = await withTimeout(source.getLedgerEntries(...chunk.map((item) => item.key)), timeoutMs);
+    response = await withTimeout(source.getLedgerEntries(...chunk.map((item) => item.key)), timeoutMs, 'getLedgerEntries');
   } catch (error) {
     const failure: LiveExecutable = { kind: 'error', message: messageOf(error) };
     for (const item of chunk) results.set(item.contractId, failure);
