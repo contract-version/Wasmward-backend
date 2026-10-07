@@ -88,3 +88,14 @@ Every deviation from the specification, and every choice the specification left 
 - **Duplicates.** A contract ID passed twice is requested once. If the RPC returns the same key twice, the first entry wins. Entries for keys that were not requested are ignored.
 - **Error text.** The RPC client rejects with plain `{ code, message }` objects for JSON-RPC errors. `messageOf` reads the `message` field so errors are readable rather than `[object Object]`. A replay test found this.
 - **Replay tests.** Wire-format responses are generated with the SDK's own XDR builders and served over local HTTP, so the real `rpc.Server` parsing is exercised. Responses recorded from testnet are added in Phase 7.
+
+## D-009: Status model choices
+
+- **Date:** 2026-10-07
+- **One function decides writability.** `effectiveStatus(state, now, maxStalenessMs)` returns the status as it stands at call time: a stored `supported` becomes `stale` once the last successful lookup is older than `maxStalenessMs`, with no poller involved. `isWritable` is defined as `effectiveStatus(...) === 'supported'`, so `supported` is the only status that can ever be writable and the call-time staleness check cannot be bypassed.
+- **Boundary.** Age equal to `maxStalenessMs` is still fresh ("within" the limit); one millisecond more is stale. This matches the spec's "older than".
+- **Clock moving backwards fails closed.** If `now` is earlier than `lastSuccessAt`, or `now` is not a number, freshness cannot be shown, so the contract is reported `stale` and writes are blocked. The next successful poll sets a new `lastSuccessAt` and recovers. A step backwards is rare; being briefly blocked is the safe side of that trade.
+- **A `supported` state with no recorded success reads as `pending`.** It cannot arise through `nextState`, but the function does not trust it.
+- **Errors after a success follow the spec literally.** Once the last success is older than the limit, the status becomes `stale` whatever it was, including `unsupported` or `missing`. The last seen hash is kept for diagnosis. All of these block writes.
+- **`initialState`.** The spec names `ContractState` but not how one starts. `initialState(name, contract)` creates the `pending` state with no history.
+- **Results that clear fields.** A successful non-Wasm result (`stellar-asset`, `missing`, `archived`) clears `liveWasmHash` and `matchedLabel`, since no Wasm hash was observed. An unsupported hash keeps `liveWasmHash` and clears `matchedLabel`.

@@ -66,3 +66,23 @@
 
 **Open issues**
 - The two uncovered lines in `fetch.ts` are the exhaustiveness guard for a future SDK executable variant; the compiler makes it unreachable.
+
+## Phase 3: Status model
+
+**Date:** 2026-10-07
+
+**Built**
+- `src/state.ts`: pure functions with no I/O and no clock: `initialState`, `nextState`, `effectiveStatus`, `isWritable`.
+- `Status` and `ContractState` added to `src/types.ts`.
+- Writability is derived from `effectiveStatus`, so only `supported` can allow writes, and staleness is re-checked on every call.
+
+**Commands run and results**
+- `pnpm typecheck`: pass
+- `pnpm lint`: pass
+- `pnpm test:coverage`: 195 tests pass, 98.2% lines
+
+**Exit criteria**
+- Table-driven tests in `test/unit/state.test.ts` cover every result kind from every previous status (7 statuses by 6 successful results), error handling before and after a success (within, at and past the limit), recovery, upgrade and config-update transitions, purity with frozen inputs, and the call-time staleness check including a stopped poller and a backwards clock.
+
+**Open issues**
+- None.
