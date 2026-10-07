@@ -210,7 +210,7 @@
 
 | Item | Result |
 |---|---|
-| Fresh clone: install, build and unit tests pass | See "Fresh clone" below. |
+| Fresh clone: install, build and unit tests pass | Pass. A clone of the pushed repository: `pnpm install --frozen-lockfile` (48 s), build, lint and typecheck clean, 14 test files and 357 tests pass, 99.58% lines. |
 | Integration tests pass on testnet, including the real upgrade | Pass. Run repeatedly; each run restores the contract to v1. |
 | `supported` is the only status for which `isWritable` returns true | Pass. A grep of `src` shows `isWritable` is defined once, as `effectiveStatus(...) === 'supported'` (`state.ts`), and the health `writable` flag uses the same comparison (`health.ts`). Tests enumerate all seven statuses. |
 | A stopped poller cannot leave a contract writable past `maxStalenessMs` | Pass. Tests in `test/unit/state.test.ts` and `test/unit/guard.test.ts` ("blocks writes once a stopped poller leaves the last success too old"). |
