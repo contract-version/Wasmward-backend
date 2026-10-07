@@ -132,3 +132,30 @@
 
 **Open issues**
 - `docs/OPERATIONS.md` (health endpoint examples for Express and Next.js) is written in Phase 8.
+
+## Phase 6: CLI
+
+**Date:** 2026-10-07
+
+**Built**
+- `src/cli-core.ts`: `main(argv, io)` with `hash`, `add` and `check`, using `util.parseArgs` and no CLI framework. Human-readable output by default and JSON with `--json`.
+- `src/cli.ts`: the four-line entry that becomes `dist/cli.js` (Node shebang confirmed in the build).
+- Exit codes: `hash` 0 or 2; `add` 0 or 2; `check` 0, 1 or 2.
+
+**Commands run and results**
+- `pnpm typecheck`: pass
+- `pnpm lint`: pass
+- `pnpm build`: pass
+- `pnpm test:coverage`: 346 tests pass, 99.6% lines
+
+**Exit criteria**
+- Each command, each exit code, JSON output and atomic write behaviour are covered:
+  - `test/unit/cli.test.ts`: in-process, with a fake chain.
+  - `test/unit/cli-atomic.test.ts`: a failing rename leaves the original and no temporary file, and the target changes only at the final rename.
+  - `test/cli/cli.e2e.test.ts`: runs the built `dist/cli.js` as a separate process against a local JSON-RPC server, including the deploy-gate story (upgrade, `check` exits 1, `add` the new build, `check` exits 0) and the default `./wasmward.json` path.
+
+**Findings**
+- Startup took 4 to 5 seconds because every command imported the Stellar SDK. `hash` now avoids it (D-012).
+
+**Open issues**
+- The spawned-process tests take several seconds each on this machine because `check` and `add` still load the SDK; they have a 90 second timeout.
