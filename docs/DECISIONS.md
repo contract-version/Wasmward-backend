@@ -40,3 +40,27 @@ Every deviation from the specification, and every choice the specification left 
   - `Wasmward-contract`: the Rust upgradeable fixture contract (v1 and v2) and the deploy and upgrade scripts (spec `fixtures/contract` and `fixtures/scripts`).
   - `Wasmward-frontend`: not used in the MVP. The spec forbids UI screens and a React package (sections 1.1 and 2.4). The browser example is a seed-backlog item.
 - **Consequence:** The testnet integration test lives in `Wasmward-backend` and reads `fixtures/testnet.json`. That file is produced by the `Wasmward-contract` deploy script and is git-ignored.
+
+## D-005: TypeScript is pinned to 6.0.3, not 7.x
+
+- **Date:** 2026-10-07
+- **Decision:** `typescript` is pinned to `6.0.3`. The newest release at resolution time was `7.0.2`.
+- **Why:** With 7.0.2, `typescript-eslint` refuses to run ("does not support TS 7.0") and tsup's declaration build cannot load the TypeScript JS API. Phase 0 requires lint and build to pass.
+- **Follow-up:** Revisit when `typescript-eslint` and `tsup` support TypeScript 7.
+- **Related:** tsup injects the deprecated `baseUrl` option into its declaration build, which TypeScript 6 rejects. `tsup.config.ts` sets `ignoreDeprecations: "6.0"` for the declaration build only.
+
+## D-006: Stellar SDK 17 API mapping (spec section 3)
+
+- **Date:** 2026-10-07
+- **Pinned:** `@stellar/stellar-sdk` 17.2.1. Each item below was checked against the installed type definitions and a runtime probe.
+- **Confirmed as specified:**
+  - `rpc.Server#getLedgerEntries`, `#getNetwork` (returns `{ passphrase, protocolVersion, friendbotUrl? }`), `#getLatestLedger` (returns `{ sequence, ... }`).
+  - `xdr.LedgerKey.contractData`, `xdr.LedgerKeyContractData` (constructor takes `{ contract, key, durability }`).
+  - `xdr.ScVal.scvLedgerKeyContractInstance()`, `Address#toScAddress()`, `StrKey.isValidContract()`.
+- **Differs from the spec text:**
+  1. `getLedgerEntries` takes variadic keys: `getLedgerEntries(...keys)`. Batching spreads each chunk.
+  2. `xdr.ContractDataDurability.persistent` is a static property, not a method call.
+  3. Decoding uses properties and a `type` discriminant, not method chains. The spec's `entry.val.contractData().val().instance().executable()` becomes `entry.val.contractData.val.instance.executable`, after checking `entry.val.type === 'contractData'`, `.val.type === 'scvContractInstance'`, and then the executable's `type`.
+  4. Wasm hash bytes come from `executable.wasmHash.toBytes()` and are hex-encoded locally.
+  5. Entry keys are matched with `XdrValue#equals`, or by comparing base64 key XDR.
+- **New variant:** `ContractExecutable` has three variants in v17: `contractExecutableWasm`, `contractExecutableStellarAsset` and `contractExecutableExternalRef`. The spec's `LiveExecutable` has no case for the third. Decision: map `contractExecutableExternalRef` to `{ kind: 'error' }` with a clear message, so the contract can never be reported `supported`. This follows the fail-closed rule.
