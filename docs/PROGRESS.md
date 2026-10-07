@@ -40,7 +40,7 @@
 
 **Exit criteria**
 - Tests for each schema rule, defaults, normalization and error messages: done (`test/unit/config.test.ts`, `test/unit/config-file.test.ts`).
-- Hash test: SHA-256 is checked against four known vectors (empty input, "abc", a bare Wasm header, 1 MiB of zeros), computed independently with Node's `crypto`. **Pending:** the comparison of the fixture v1 Wasm hash with the hash printed by the Stellar CLI on upload moves to Phase 7, as the spec allows.
+- Hash test: SHA-256 is checked against four known vectors (empty input, "abc", a bare Wasm header, 1 MiB of zeros), computed independently with Node's `crypto`. **Done in Phase 7:** the fixture v1 and v2 Wasm hashes computed by `hashWasm` equal the hashes Stellar returned on upload (see Phase 7).
 
 **Open issues**
 - `src/cli.ts` is still a placeholder and shows 0% in the coverage report; Phase 6 replaces it.
@@ -159,3 +159,39 @@
 
 **Open issues**
 - The spawned-process tests take several seconds each on this machine because `check` and `add` still load the SDK; they have a 90 second timeout.
+
+## Phase 7: Fixture contract and testnet integration
+
+**Date:** 2026-10-07
+
+**Built**
+- `Wasmward-contract`: `contracts/fixture` (`__constructor`, `version`, `upgrade`; the `v2` feature selects the second build), its unit tests for both builds, and `scripts/deploy.sh`.
+- `test/integration/upgrade.test.ts` and `fixture.ts` in this repository; `test/replay/recorded.test.ts` with responses recorded from testnet.
+- CI integration job that deploys the fixture, then runs the tests.
+
+**Commands run and results**
+- `cargo test` and `cargo test --features v2` in `Wasmward-contract`: pass.
+- `bash scripts/deploy.sh`: built v1 and v2, uploaded both, compared hashes, deployed v1.
+- `pnpm test:integration`: 4 tests pass against Stellar testnet. Run four times in total; each run starts from v1 and leaves the contract on v1.
+- `pnpm test:coverage`: 350 tests pass, 99.6% lines.
+
+**Hash equality, local versus on-chain** (recorded as the spec requires)
+
+| Build | SHA-256 computed locally | Hash returned by the upload | Equal |
+|---|---|---|---|
+| v1 | `a7a82511fa284650178b02fe3a4bafc587b95212f2f8ce647f2df5ef4cf42509` | same | yes |
+| v2 | `ec040ead4e157695a16a9723a5d95a44268f1b8da4c5f6aee7bf4f218dbdc875` | same | yes |
+
+`deploy.sh` checks this with `sha256sum`; the integration test checks it again with `hashWasm`. That settles the Phase 1 item that was waiting for a real Wasm file.
+
+**Fixture on testnet**
+- Contract: `CBR5ZFDI2GBXG66DAEWWHSAK4NDLKSKHWVUEUSOM4UOBM66TI6DYPDPV`, deployed 2026-10-07. Testnet may reset, and a contract that is not extended eventually expires; re-run `deploy.sh` to make a new one.
+
+**Success criteria from spec section 2.5, observed on testnet**
+- With only v1 supported, the guard moved to `unsupported` within one poll interval of the upgrade (5 s interval; noticed about 0.7 to 0.8 s after the upgrade was confirmed) and `assertWritable` threw.
+- With the v2 hash added to the config, a new guard returned to `supported`.
+- A random valid contract ID was reported `missing` and blocked.
+
+**Open issues**
+- The CI integration job has not yet run on a hosted runner; it will on the next push to main only if a `FIXTURE_SECRET` secret exists, or on manual dispatch.
+- Exit criterion "from a clean clone" is verified here by re-running `deploy.sh`, which generates a fresh identity when none exists; a literal fresh clone on another machine is still to be done.
