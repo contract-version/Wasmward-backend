@@ -126,8 +126,9 @@ function formatPath(path: readonly PropertyKey[]): string {
 /**
  * Validates a config object and returns it with defaults applied and hashes lowercased.
  * Works in every runtime. Throws {@link ConfigError} listing every issue with its JSON path.
+ * `options.source` names the file the input came from and is added to the error message.
  */
-export function loadConfig(input: unknown): WasmwardConfig {
+export function loadConfig(input: unknown, options: { source?: string } = {}): WasmwardConfig {
   const result = configSchema.safeParse(input);
   if (result.success) return result.data;
   const issues: ConfigIssue[] = result.error.issues.map((issue) => ({
@@ -135,5 +136,5 @@ export function loadConfig(input: unknown): WasmwardConfig {
     // `contracts` is the only record in the schema, so a bad key is always a bad contract name.
     message: issue.code === 'invalid_key' ? `contract name must match ${CONTRACT_NAME.source}` : issue.message,
   }));
-  throw ConfigError.fromIssues(issues);
+  throw ConfigError.fromIssues(issues, options.source);
 }

@@ -15,9 +15,10 @@ export class ConfigError extends Error {
     this.issues = issues;
   }
 
-  /** Builds an error whose message lists every issue with its path. */
-  static fromIssues(issues: readonly ConfigIssue[]): ConfigError {
+  /** Builds an error whose message lists every issue with its path. `source` names the file, if any. */
+  static fromIssues(issues: readonly ConfigIssue[], source?: string): ConfigError {
     const lines = issues.map((issue) => `  - ${issue.path}: ${issue.message}`);
-    return new ConfigError(`Invalid Wasmward config:\n${lines.join('\n')}`, issues);
+    const where = source === undefined ? '' : ` in ${source}`;
+    return new ConfigError(`Invalid Wasmward config${where}:\n${lines.join('\n')}`, issues);
   }
 }
