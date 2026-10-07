@@ -64,3 +64,14 @@ Every deviation from the specification, and every choice the specification left 
   4. Wasm hash bytes come from `executable.wasmHash.toBytes()` and are hex-encoded locally.
   5. Entry keys are matched with `XdrValue#equals`, or by comparing base64 key XDR.
 - **New variant:** `ContractExecutable` has three variants in v17: `contractExecutableWasm`, `contractExecutableStellarAsset` and `contractExecutableExternalRef`. The spec's `LiveExecutable` has no case for the third. Decision: map `contractExecutableExternalRef` to `{ kind: 'error' }` with a clear message, so the contract can never be reported `supported`. This follows the fail-closed rule.
+
+## D-007: Config schema choices the spec left open
+
+- **Date:** 2026-10-07
+- **Unknown keys are rejected.** Every object in the config is strict. A typo such as `pollIntervalMS` would otherwise be ignored silently and the default used, which is the wrong failure mode for a guard.
+- **`label` is optional.** The spec requires labels to be non-empty strings of at most 64 characters when present, and `ContractState.matchedLabel` is optional, so a version may have only a hash.
+- **Integer intervals.** `pollIntervalMs` and `maxStalenessMs` must be integers.
+- **Browser-safe split.** `loadConfig` is exported from the main entry. `loadConfigFile` lives in `src/node.ts`, published as `@wasmward/core/node`, so browser bundles never import `fs`. `src/node.ts` is not in the spec's file list; it is the file behind the export path the spec requires.
+- **Byte order mark.** `loadConfigFile` strips a leading UTF-8 byte order mark before parsing, because Windows editors and PowerShell commonly write one and `JSON.parse` rejects it.
+- **Dependent rules wait for independent ones.** zod skips a cross-field rule (duplicate hashes, `maxStalenessMs` against `pollIntervalMs`) while the fields it compares are themselves invalid. A user with several mistakes may therefore see them over two runs. Each run still lists every issue it can evaluate.
+- **Contract-name errors.** zod 4 reports a bad record key as a generic "Invalid key in record". `loadConfig` rewrites that issue to `contract name must match <regex>`.
