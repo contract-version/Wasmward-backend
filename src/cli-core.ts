@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, link, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { ConfigDocument } from './config.js';
@@ -26,12 +26,16 @@ const DEFAULT_CONFIG_PATH = './wasmward.json';
 const MAX_LOOKUP_TIMEOUT_MS = 10_000;
 
 const USAGE = `Usage:
+  wasmward init <name> <contract-id> (--preset <testnet|mainnet> | --rpc-url <url> --passphrase <text>)
+               [--wasm <file.wasm>] [--label <label>] [--rpc-url <url>] [--config <path>] [--json]
   wasmward hash <file.wasm> [--json]
   wasmward add <name> <file.wasm> --label <label> [--config <path>] [--network <name>] [--json]
   wasmward check [--config <path>] [--network <name>] [--json]
   wasmward watch [--config <path>] [--network <name>] [--json]
 
 Commands:
+  init    Create a new config for one contract, starting from a Wasm file you trust (--wasm)
+          or, failing that, the code that is live on the network right now.
   hash    Print the lowercase SHA-256 hash of a Wasm file.
   add     Add a Wasm file's hash to a contract's supported list in the config.
   check   Look up the live code of every configured contract and report its status.
@@ -47,7 +51,11 @@ Exit codes:
 Options:
   --config <path>  Config file (default ${DEFAULT_CONFIG_PATH})
   --network <name> Which network, for a config with a "networks" section
-  --label <label>  Label for the version being added
+  --label <label>  Label for the version being added (init: default "initial")
+  --preset <name>  init: testnet (public RPC included) or mainnet (you must give --rpc-url)
+  --rpc-url <url>  init: the RPC endpoint
+  --passphrase <t> init: the network passphrase, when not using --preset
+  --wasm <file>    init: take the first supported hash from this build instead of from the network
   --json           Machine-readable output
   -h, --help       Show this help
 `;
@@ -170,6 +178,143 @@ async function hashCommand(files: string[], json: boolean, io: CliIo): Promise<n
   if (file === undefined || extra.length > 0) throw new CliError('Usage: wasmward hash <file.wasm>');
   const wasmHash = await hashWasm(await readWasm(file));
   io.stdout(json ? jsonLine({ file, wasmHash }) : `${wasmHash}\n`);
+  return EXIT_OK;
+}
+
+/** Networks init knows, so a config does not need the passphrase typed out. */
+const PRESETS: Record<string, { rpcUrl: string | undefined; passphrase: string }> = {
+  testnet: { rpcUrl: 'https://soroban-testnet.stellar.org', passphrase: 'Test SDF Network ; September 2015' },
+  // The Stellar Development Foundation does not run a public mainnet RPC; use your own provider.
+  mainnet: { rpcUrl: undefined, passphrase: 'Public Global Stellar Network ; September 2015' },
+};
+
+/** Creates a file only if it does not exist, writing it whole or not at all. */
+async function createFileExclusive(path: string, text: string): Promise<void> {
+  const exists = (): CliError =>
+    new CliError(`${path} already exists. init never overwrites a file; delete it or choose another with --config.`);
+  const temp = join(dirname(path), `.${randomBytes(6).toString('hex')}.wasmward.tmp`);
+  try {
+    await writeFile(temp, text, 'utf8');
+    try {
+      await link(temp, path); // fails if the path exists, so two runs cannot overwrite each other
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw exists();
+      // Some file systems cannot make hard links; an exclusive create is the next best thing.
+      try {
+        await writeFile(path, text, { encoding: 'utf8', flag: 'wx' });
+      } catch (fallback) {
+        if ((fallback as NodeJS.ErrnoException).code === 'EEXIST') throw exists();
+        throw fallback;
+      }
+    }
+  } finally {
+    await rm(temp, { force: true });
+  }
+}
+
+async function initCommand(
+  positionals: string[],
+  options: {
+    config: string;
+    label: string | undefined;
+    wasm: string | undefined;
+    preset: string | undefined;
+    rpcUrl: string | undefined;
+    passphrase: string | undefined;
+    json: boolean;
+  },
+  io: CliIo,
+): Promise<number> {
+  const [name, contractId, ...extra] = positionals;
+  if (name === undefined || contractId === undefined || extra.length > 0) {
+    throw new CliError(
+      'Usage: wasmward init <name> <contract-id> (--preset <testnet|mainnet> | --rpc-url <url> --passphrase <text>) [--wasm <file.wasm>]',
+    );
+  }
+
+  const preset = options.preset === undefined ? undefined : Object.hasOwn(PRESETS, options.preset) ? PRESETS[options.preset] : undefined;
+  if (options.preset !== undefined && preset === undefined) {
+    throw new CliError(`Unknown preset '${options.preset}'. Choose one of: ${Object.keys(PRESETS).join(', ')}.`);
+  }
+  if (preset !== undefined && options.passphrase !== undefined && options.passphrase !== preset.passphrase) {
+    throw new CliError(`--passphrase does not match the ${options.preset} preset. Use one or the other.`);
+  }
+  const rpcUrl = options.rpcUrl ?? preset?.rpcUrl;
+  const passphrase = options.passphrase ?? preset?.passphrase;
+  if (rpcUrl === undefined || passphrase === undefined) {
+    throw new CliError(
+      options.preset === 'mainnet' && rpcUrl === undefined
+        ? 'The mainnet preset needs your own RPC endpoint: add --rpc-url <url>.'
+        : 'Say which network: --preset <testnet|mainnet>, or both --rpc-url and --passphrase.',
+    );
+  }
+
+  // Fail before any network work if the file is already there.
+  let alreadyThere = false;
+  try {
+    await access(options.config);
+    alreadyThere = true;
+  } catch {
+    // Not there, which is what we want.
+  }
+  if (alreadyThere) {
+    throw new CliError(`${options.config} already exists. init never overwrites a file; delete it or choose another with --config.`);
+  }
+
+  const { loadConfig } = await loadConfigModule();
+  const draft = (wasmHash: string, label: string): Record<string, unknown> => ({
+    version: 1,
+    network: { rpcUrl, passphrase },
+    contracts: { [name]: { contractId, supported: [{ wasmHash, label }] } },
+  });
+  const label = options.label ?? 'initial';
+
+  let wasmHash: string;
+  let source: 'wasm-file' | 'network';
+  if (options.wasm !== undefined) {
+    wasmHash = await hashWasm(await readWasm(options.wasm));
+    source = 'wasm-file';
+    loadConfig(draft(wasmHash, label), { source: 'the new config' });
+  } else {
+    // Validate everything else first, with a placeholder hash, so a typo does not cost a network call.
+    const placeholder = loadConfig(draft('0'.repeat(64), label), { source: 'the new config' });
+    const { createEndpointSet } = await loadEndpointsModule();
+    const timeoutMs = Math.min(placeholder.pollIntervalMs, MAX_LOOKUP_TIMEOUT_MS);
+    const server = await (io.createServer ?? defaultServer)(placeholder);
+    const endpoints = createEndpointSet([server], passphrase, timeoutMs);
+    try {
+      await endpoints.verifyNetwork();
+    } catch (error) {
+      if (error instanceof ConfigError) throw error;
+      throw new CliError(messageOf(error));
+    }
+    const result = (await endpoints.lookup([contractId], timeoutMs)).get(contractId);
+    if (result === undefined || result.kind === 'error') {
+      throw new CliError(`Could not read the live code of ${contractId}: ${result?.kind === 'error' ? result.message : 'no answer'}`);
+    }
+    if (result.kind === 'missing') throw new CliError(`No contract with ID ${contractId} exists on this network.`);
+    if (result.kind === 'archived') throw new CliError(`The instance of ${contractId} has expired (archived); restore it first.`);
+    if (result.kind === 'stellar-asset') {
+      throw new CliError(`${contractId} is a Stellar Asset Contract. Wasmward guards contracts that run Wasm code.`);
+    }
+    wasmHash = result.wasmHash;
+    source = 'network';
+    if (!options.json) {
+      io.stderr(
+        'Starting from the code that is live right now. That trusts the RPC and whoever deployed it; ' +
+          'to start from a build you trust, run init again with --wasm <file.wasm>.\n',
+      );
+    }
+  }
+
+  const document = draft(wasmHash, label);
+  loadConfig(document, { source: 'the new config' }); // never write what would not load
+  await createFileExclusive(options.config, `${JSON.stringify(document, null, 2)}\n`);
+  io.stdout(
+    options.json
+      ? jsonLine({ config: options.config, contract: name, contractId, wasmHash, label, source })
+      : `Created ${options.config}: '${name}' supports ${label} (${wasmHash}), taken from ${source === 'wasm-file' ? options.wasm : 'the network'}.\n`,
+  );
   return EXIT_OK;
 }
 
@@ -431,6 +576,20 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
     switch (command) {
       case 'hash':
         return await hashCommand(rest, values.json === true, io);
+      case 'init':
+        return await initCommand(
+          rest,
+          {
+            config,
+            label: values.label,
+            wasm: values.wasm,
+            preset: values.preset,
+            rpcUrl: values['rpc-url'],
+            passphrase: values.passphrase,
+            json: values.json === true,
+          },
+          io,
+        );
       case 'add':
         return await addCommand(rest, { config, network: values.network, label: values.label, json: values.json === true }, io);
       case 'check':
@@ -458,6 +617,10 @@ function parseCommandLine(argv: string[]) {
       config: { type: 'string' },
       network: { type: 'string' },
       label: { type: 'string' },
+      wasm: { type: 'string' },
+      preset: { type: 'string' },
+      'rpc-url': { type: 'string' },
+      passphrase: { type: 'string' },
       json: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
     },
