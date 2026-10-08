@@ -62,7 +62,9 @@ export function createEndpointSet(
   async function verifyOne(index: number): Promise<void> {
     if (verified.has(index)) return;
     const known = rejected.get(index);
-    if (known !== undefined) throw new Error(known);
+    // A rejected endpoint is on the wrong network, which is always a configuration problem. Keep saying so on
+    // every later ask, or a retry would look like an outage and move on to a fallback.
+    if (known !== undefined) throw new ConfigError(known);
     const server = servers[index] as GuardServer;
     const actual = (await withTimeout(server.getNetwork(), verifyTimeoutMs, 'getNetwork')).passphrase;
     if (actual !== passphrase) {
