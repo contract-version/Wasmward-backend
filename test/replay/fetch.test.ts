@@ -1,9 +1,9 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { rpc } from '@stellar/stellar-sdk';
+import { rpc, xdr } from '@stellar/stellar-sdk';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { fetchExecutables } from '../../src/fetch.js';
-import { contractIdOf, hashOf, parsedEntry, toRaw, type RawEntry } from '../fixtures/ledger.js';
+import { contractIdOf, hashOf, parsedCodeEntry, parsedEntry, toRaw, type RawEntry } from '../fixtures/ledger.js';
 
 /**
  * These tests run the real `rpc.Server` against a local HTTP server that replies with
@@ -57,8 +57,26 @@ function client(): rpc.Server {
   return new rpc.Server(`http://127.0.0.1:${port}`, { allowHttp: true });
 }
 
-function replyWith(entries: RawEntry[], latestLedger: number = LATEST): void {
-  reply = (request, res) => json(res, request.id, { entries, latestLedger });
+/**
+ * Answers instance lookups with `entries`. Lookups for Wasm code entries get `codeEntries`, or by default a
+ * live entry for every hash asked about.
+ */
+function replyWith(entries: RawEntry[], latestLedger: number = LATEST, codeEntries?: RawEntry[]): void {
+  reply = (request, res) => {
+    const keys = request.params.keys.map((key) => xdr.LedgerKey.fromXdr(key, 'base64'));
+    if (keys.length > 0 && keys.every((key) => key.type === 'contractCode')) {
+      const live = keys.map((key) =>
+        key.type === 'contractCode' ? toRaw(parsedCodeEntry(Buffer.from(key.contractCode.hash.toBytes()).toString('hex'), LATEST + 100)) : never(),
+      );
+      json(res, request.id, { entries: codeEntries ?? live, latestLedger });
+    } else {
+      json(res, request.id, { entries, latestLedger });
+    }
+  };
+}
+
+function never(): never {
+  throw new Error('unreachable');
 }
 
 describe('fetchExecutables against a replayed RPC', () => {
@@ -70,16 +88,44 @@ describe('fetchExecutables against a replayed RPC', () => {
 
     const result = await fetchExecutables(client(), [A, B, C], 5_000);
 
-    expect(requests).toHaveLength(1);
+    // One lookup for the three instances, then one for the single Wasm hash found.
+    expect(requests).toHaveLength(2);
     expect(requests[0]?.keys).toHaveLength(3);
+    expect(requests[1]?.keys).toHaveLength(1);
     expect(result.get(A)).toEqual({
       kind: 'wasm',
       wasmHash: hashOf(1),
       liveUntilLedger: LATEST + 20,
+      codeLiveUntilLedger: LATEST + 100,
       latestLedger: LATEST,
     });
     expect(result.get(B)).toEqual({ kind: 'missing', latestLedger: LATEST });
     expect(result.get(C)).toEqual({ kind: 'stellar-asset', latestLedger: LATEST });
+  });
+
+  it('reads the code entry from a wire-format response and reports its own expiry', async () => {
+    replyWith([toRaw(parsedEntry(A, { type: 'wasm', hash: hashOf(1) }, LATEST + 900))], LATEST, [
+      toRaw(parsedCodeEntry(hashOf(1), LATEST + 40)),
+    ]);
+    expect((await fetchExecutables(client(), [A], 5_000)).get(A)).toMatchObject({
+      kind: 'wasm',
+      liveUntilLedger: LATEST + 900,
+      codeLiveUntilLedger: LATEST + 40,
+    });
+  });
+
+  it('reports an expired code entry as archived, and an absent one too', async () => {
+    const instance = [toRaw(parsedEntry(A, { type: 'wasm', hash: hashOf(1) }, LATEST + 900))];
+    replyWith(instance, LATEST, [toRaw(parsedCodeEntry(hashOf(1), LATEST - 3))]);
+    expect((await fetchExecutables(client(), [A], 5_000)).get(A)).toEqual({
+      kind: 'archived',
+      entry: 'code',
+      wasmHash: hashOf(1),
+      liveUntilLedger: LATEST - 3,
+      latestLedger: LATEST,
+    });
+    replyWith(instance, LATEST, []);
+    expect((await fetchExecutables(client(), [A], 5_000)).get(A)).toMatchObject({ kind: 'archived', entry: 'code' });
   });
 
   it('reports an expired instance as archived', async () => {

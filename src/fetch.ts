@@ -34,6 +34,11 @@ function messageOf(error: unknown): string {
   return String(error);
 }
 
+function codeKey(wasmHash: string): xdr.LedgerKey {
+  const bytes = Uint8Array.from(wasmHash.match(/../g) ?? [], (pair) => parseInt(pair, 16));
+  return xdr.LedgerKey.contractCode(new xdr.LedgerKeyContractCode({ hash: bytes }));
+}
+
 function toHex(bytes: Uint8Array): string {
   let hex = '';
   for (const byte of bytes) hex += byte.toString(16).padStart(2, '0');
@@ -80,10 +85,12 @@ function decodeEntry(entry: rpc.Api.LedgerEntryResult, latestLedger: number): Li
       if (liveUntilLedger < latestLedger) {
         return { kind: 'archived', liveUntilLedger, latestLedger };
       }
+      // The Wasm code is a separate ledger entry with its own lifetime; `attachCodeLifetimes` fills it in.
       return {
         kind: 'wasm',
         wasmHash: toHex(executable.wasmHash.toBytes()),
         liveUntilLedger,
+        codeLiveUntilLedger: liveUntilLedger,
         latestLedger,
       };
     }
@@ -145,6 +152,78 @@ async function fetchChunk(
 }
 
 /**
+ * Second lookup: for every contract running Wasm, reads the ledger entry that holds that Wasm (once per
+ * distinct hash). A live instance whose code entry has expired still looks healthy but every call fails, so
+ * an expired or missing code entry makes the contract `archived`. The code bytes themselves are never read.
+ */
+async function attachCodeLifetimes(
+  source: LedgerEntriesSource,
+  timeoutMs: number,
+  results: Map<string, LiveExecutable>,
+): Promise<void> {
+  const byHash = new Map<string, string[]>();
+  for (const [contractId, result] of results) {
+    if (result.kind !== 'wasm') continue;
+    byHash.set(result.wasmHash, [...(byHash.get(result.wasmHash) ?? []), contractId]);
+  }
+  const hashes = [...byHash.keys()];
+  const chunks: string[][] = [];
+  for (let start = 0; start < hashes.length; start += MAX_KEYS_PER_REQUEST) {
+    chunks.push(hashes.slice(start, start + MAX_KEYS_PER_REQUEST));
+  }
+
+  await Promise.all(
+    chunks.map(async (chunk) => {
+      const fail = (message: string): void => {
+        for (const hash of chunk) for (const id of byHash.get(hash) ?? []) results.set(id, { kind: 'error', message });
+      };
+      const keys = new Map(chunk.map((hash) => [codeKey(hash).toXdr('base64'), hash]));
+      let response: rpc.Api.GetLedgerEntriesResponse;
+      try {
+        response = await withTimeout(
+          source.getLedgerEntries(...chunk.map((hash) => codeKey(hash))),
+          timeoutMs,
+          'getLedgerEntries (code)',
+        );
+      } catch (error) {
+        fail(`could not read the Wasm code entry: ${messageOf(error)}`);
+        return;
+      }
+      const latestLedger = response.latestLedger;
+      if (typeof latestLedger !== 'number' || !Number.isFinite(latestLedger)) {
+        fail('RPC response for the Wasm code entry did not include a valid latestLedger');
+        return;
+      }
+
+      // Match by key XDR, never by position. An entry that is absent from the answer is a missing entry.
+      const liveUntil = new Map<string, number | undefined>();
+      for (const entry of response.entries ?? []) {
+        try {
+          const hash = keys.get(entry.key.toXdr('base64'));
+          if (hash !== undefined && !liveUntil.has(hash)) liveUntil.set(hash, entry.liveUntilLedgerSeq);
+        } catch {
+          // An undecodable entry counts as absent, which blocks writes.
+        }
+      }
+      for (const hash of chunk) {
+        for (const contractId of byHash.get(hash) ?? []) {
+          const instance = results.get(contractId);
+          if (instance?.kind !== 'wasm') continue;
+          const end = liveUntil.get(hash);
+          if (!liveUntil.has(hash) || (end !== undefined && end < latestLedger)) {
+            results.set(contractId, { kind: 'archived', entry: 'code', wasmHash: hash, latestLedger, ...(end === undefined ? {} : { liveUntilLedger: end }) });
+          } else if (end === undefined) {
+            results.set(contractId, { kind: 'error', message: 'RPC did not return liveUntilLedgerSeq for the Wasm code entry, so its expiry cannot be ruled out' });
+          } else {
+            results.set(contractId, { ...instance, codeLiveUntilLedger: end });
+          }
+        }
+      }
+    }),
+  );
+}
+
+/**
  * Looks up what code each contract instance is running, using as few RPC calls as the
  * per-request key limit allows. Every requested contract ID appears in the returned map.
  * Failures (network, timeout, malformed data) come back as `{ kind: 'error' }` rather than throwing.
@@ -171,6 +250,7 @@ export async function fetchExecutables(
     chunks.push(requested.slice(start, start + MAX_KEYS_PER_REQUEST));
   }
   await Promise.all(chunks.map((chunk) => fetchChunk(source, chunk, timeoutMs, results)));
+  await attachCodeLifetimes(source, timeoutMs, results);
 
   return results;
 }

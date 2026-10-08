@@ -28,6 +28,27 @@ export function instanceKeyFor(contractId: string): xdr.LedgerKey {
   );
 }
 
+export function codeKeyFor(wasmHash: string): xdr.LedgerKey {
+  return xdr.LedgerKey.contractCode(new xdr.LedgerKeyContractCode({ hash: hexToBytes(wasmHash) }));
+}
+
+/** The ledger entry that holds a contract's Wasm (the bytes are a stand-in; only the lifetime matters). */
+export function parsedCodeEntry(wasmHash: string, liveUntilLedgerSeq: number | undefined): rpc.Api.LedgerEntryResult {
+  const entry: rpc.Api.LedgerEntryResult = {
+    lastModifiedLedgerSeq: 100,
+    key: codeKeyFor(wasmHash),
+    val: new xdr.LedgerEntryDataContractCode(
+      new xdr.ContractCodeEntry({
+        ext: xdr.ContractCodeEntryExt.fromXdrObject({ v: 0 }),
+        hash: hexToBytes(wasmHash),
+        code: new Uint8Array([0, 97, 115, 109]),
+      }),
+    ),
+  };
+  if (liveUntilLedgerSeq !== undefined) entry.liveUntilLedgerSeq = liveUntilLedgerSeq;
+  return entry;
+}
+
 export type ExecutableSpec =
   | { type: 'wasm'; hash: string }
   | { type: 'asset' }

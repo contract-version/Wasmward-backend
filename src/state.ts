@@ -61,6 +61,7 @@ export function nextState(
     case 'wasm': {
       next.liveWasmHash = result.wasmHash;
       next.liveUntilLedger = result.liveUntilLedger;
+      next.codeLiveUntilLedger = result.codeLiveUntilLedger;
       next.latestLedger = result.latestLedger;
       const match = cfg.supported.find((version) => version.wasmHash === result.wasmHash);
       if (match === undefined) {
@@ -79,7 +80,12 @@ export function nextState(
       return next;
     case 'archived':
       next.status = 'archived';
-      next.liveUntilLedger = result.liveUntilLedger;
+      if (result.liveUntilLedger !== undefined) {
+        if (result.entry === 'code') next.codeLiveUntilLedger = result.liveUntilLedger;
+        else next.liveUntilLedger = result.liveUntilLedger;
+      }
+      if (result.entry === 'code') next.archivedEntry = 'code';
+      if (result.wasmHash !== undefined) next.liveWasmHash = result.wasmHash;
       next.latestLedger = result.latestLedger;
       return next;
   }
@@ -108,7 +114,9 @@ export function describeBlock(state: ContractState, now: number, maxStalenessMs:
     case 'missing':
       return 'no contract instance was found on this network';
     case 'archived':
-      return 'the contract instance has expired (archived) and must be restored first';
+      return state.archivedEntry === 'code'
+        ? 'the Wasm code of the contract has expired (archived) or cannot be found, so calls would fail until it is restored'
+        : 'the contract instance has expired (archived) and must be restored first';
     case 'stale': {
       const age = state.lastSuccessAt === undefined ? undefined : now - state.lastSuccessAt;
       const when = age !== undefined && age >= 0 ? `was ${seconds(age)} ago` : 'cannot be dated';
@@ -124,12 +132,24 @@ export const SECONDS_PER_LEDGER = 5;
 export const EXPIRY_WARNING_LEDGERS = (7 * 24 * 60 * 60) / SECONDS_PER_LEDGER;
 
 /**
- * How many ledgers the instance had left when it was last looked up, or undefined when that is not known.
- * Zero means it had already reached the end of its life. This is a snapshot: it does not count down.
+ * How many ledgers the contract had left when it was last looked up, or undefined when that is not known.
+ * A contract needs two ledger entries to run, the instance and the Wasm code, each with its own lifetime, so
+ * this is the smaller of the two. Zero means one had already reached the end of its life. A snapshot, not a countdown.
  */
 export function ledgersUntilExpiry(state: ContractState): number | undefined {
-  if (state.liveUntilLedger === undefined || state.latestLedger === undefined) return undefined;
-  return Math.max(0, state.liveUntilLedger - state.latestLedger);
+  if (state.latestLedger === undefined) return undefined;
+  const ends = [state.liveUntilLedger, state.codeLiveUntilLedger].filter((end): end is number => end !== undefined);
+  if (ends.length === 0) return undefined;
+  return Math.max(0, Math.min(...ends) - state.latestLedger);
+}
+
+/** Which entry {@link ledgersUntilExpiry} is counting down to: the one that expires first, when both are known. */
+export function expiringEntry(state: ContractState): 'instance' | 'code' | undefined {
+  const { liveUntilLedger: instance, codeLiveUntilLedger: code } = state;
+  if (instance === undefined && code === undefined) return undefined;
+  if (code === undefined) return 'instance';
+  if (instance === undefined) return 'code';
+  return code < instance ? 'code' : 'instance';
 }
 
 /** A rough, human time for a number of ledgers, such as "about 6 days" or "about 5 hours". */

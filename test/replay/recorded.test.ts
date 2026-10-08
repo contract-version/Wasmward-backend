@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { rpc } from '@stellar/stellar-sdk';
+import { rpc, xdr } from '@stellar/stellar-sdk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { fetchExecutables } from '../../src/fetch.js';
 import { createVersionGuard } from '../../src/guard.js';
@@ -9,13 +9,14 @@ import type { WasmwardConfigInput } from '../../src/types.js';
 
 /**
  * Replays responses recorded from Stellar testnet (test/fixtures/recorded/testnet-v1.json): the
- * instance entry of the deployed v1 fixture contract, exactly as the RPC returned it.
+ * instance entry and the Wasm code entry of the deployed v1 fixture contract, exactly as the RPC returned them.
  */
 interface Recording {
   recordedAt: string;
   contractId: string;
   expectedWasmHash: string;
   getLedgerEntries: { result: { entries: { liveUntilLedgerSeq: number }[]; latestLedger: number } };
+  getCodeEntries: { result: { entries: { liveUntilLedgerSeq: number }[]; latestLedger: number } };
   getNetwork: { result: { passphrase: string } };
 }
 
@@ -37,12 +38,14 @@ function readBody(req: IncomingMessage): Promise<string> {
 beforeAll(async () => {
   server = createServer((req, res) => {
     void readBody(req).then((text) => {
-      const request = JSON.parse(text) as { id: number; method: string };
+      const request = JSON.parse(text) as { id: number; method: string; params?: { keys?: string[] } };
+      // The guard asks for the instance first, then for the Wasm code entry; answer each with its recording.
+      const asksForCode = (request.params?.keys ?? []).some((key) => xdr.LedgerKey.fromXdr(key, 'base64').type === 'contractCode');
       const reply =
         request.method === 'getNetwork'
           ? (recording.getNetwork as object)
           : request.method === 'getLedgerEntries'
-            ? (recording.getLedgerEntries as object)
+            ? ((asksForCode ? recording.getCodeEntries : recording.getLedgerEntries) as object)
             : { error: { code: -32601, message: 'method not found' } };
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ ...reply, jsonrpc: '2.0', id: request.id }));
@@ -75,8 +78,17 @@ describe('responses recorded from testnet', () => {
       kind: 'wasm',
       wasmHash: recording.expectedWasmHash,
       liveUntilLedger: recording.getLedgerEntries.result.entries[0]?.liveUntilLedgerSeq,
+      codeLiveUntilLedger: recording.getCodeEntries.result.entries[0]?.liveUntilLedgerSeq,
       latestLedger: recording.getLedgerEntries.result.latestLedger,
     });
+  });
+
+  it('reads the real Wasm code entry, which has its own lifetime', () => {
+    const code = recording.getCodeEntries.result.entries[0]?.liveUntilLedgerSeq;
+    const instance = recording.getLedgerEntries.result.entries[0]?.liveUntilLedgerSeq;
+    expect(code).toBeGreaterThan(recording.getCodeEntries.result.latestLedger);
+    // They were extended separately, so the recorded lifetimes need not match; both must be present.
+    expect(instance).toBeGreaterThan(recording.getLedgerEntries.result.latestLedger);
   });
 
   it('reports a contract id the RPC returned nothing for as missing', async () => {

@@ -7,7 +7,7 @@ import { ConfigError } from './errors.js';
 import type { GuardServer } from './guard.js';
 import { hashWasm } from './hash.js';
 import { buildHealth, type ContractHealth, type HealthReport } from './health.js';
-import { describeBlock, describeTimeLeft, EXPIRY_WARNING_LEDGERS, initialState, ledgersUntilExpiry, nextState, SECONDS_PER_LEDGER } from './state.js';
+import { describeBlock, describeTimeLeft, expiringEntry, EXPIRY_WARNING_LEDGERS, initialState, ledgersUntilExpiry, nextState, SECONDS_PER_LEDGER } from './state.js';
 import type { ContractState, WasmwardConfig } from './types.js';
 
 // The Stellar SDK is large and slow to load. These modules pull it in, so they are imported only by
@@ -424,15 +424,20 @@ async function watchCommand(options: { config: string; network: string | undefin
   return EXIT_OK;
 }
 
-/** How long the instance has left, and a nudge when it is short. Informational: it never changes a status. */
+/**
+ * How long the contract has left, and a nudge when it is short. Informational: it never changes a status.
+ * The contract needs its instance and its Wasm code, which expire separately; the note says "Wasm code" when
+ * that is the one running out first, because it is extended with a different command.
+ */
 function expiryNote(state: ContractState, minTtl: MinTtl | undefined): string {
   const remaining = ledgersUntilExpiry(state);
   if (remaining === undefined) return '';
+  const what = expiringEntry(state) === 'code' ? 'Wasm code expires' : 'expires';
   if (isTooCloseToExpiry(state, minTtl) && minTtl !== undefined) {
-    return `  (expires in ${describeTimeLeft(remaining)}: under the ${minTtl.days}-day minimum)`;
+    return `  (${what} in ${describeTimeLeft(remaining)}: under the ${minTtl.days}-day minimum)`;
   }
   const soon = remaining < EXPIRY_WARNING_LEDGERS ? '; extend its lifetime soon' : '';
-  return `  (expires in ${describeTimeLeft(remaining)}${soon})`;
+  return `  (${what} in ${describeTimeLeft(remaining)}${soon})`;
 }
 
 function renderCheck(states: ContractState[], config: WasmwardConfig, now: number, minTtl: MinTtl | undefined): string {

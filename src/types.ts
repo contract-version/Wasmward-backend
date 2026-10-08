@@ -44,11 +44,15 @@ export interface WasmwardConfig {
 
 /** What a contract instance is running right now, or why that could not be determined. */
 export type LiveExecutable =
-  | { kind: 'wasm'; wasmHash: string; liveUntilLedger: number; latestLedger: number }
+  | { kind: 'wasm'; wasmHash: string; liveUntilLedger: number; codeLiveUntilLedger: number; latestLedger: number }
   | { kind: 'stellar-asset'; latestLedger: number }
   /** No instance entry was found. The contract does not exist on this network. */
   | { kind: 'missing'; latestLedger: number }
-  | { kind: 'archived'; liveUntilLedger: number; latestLedger: number }
+  /**
+   * Something the contract needs has expired. By default the instance; `entry: 'code'` means the instance is
+   * live but the ledger entry holding its Wasm is not (expired, or not found), so calls would fail.
+   */
+  | { kind: 'archived'; liveUntilLedger?: number; latestLedger: number; entry?: 'code'; wasmHash?: string }
   | { kind: 'error'; message: string };
 
 /** Why a contract is, or is not, safe to write to. Only `supported` allows writes. */
@@ -69,6 +73,10 @@ export interface ContractState {
   liveWasmHash?: string;
   /** Ledger after which the contract instance expires, as of the last lookup that found one. */
   liveUntilLedger?: number;
+  /** Ledger after which the entry holding the contract's Wasm expires. It has its own lifetime. */
+  codeLiveUntilLedger?: number;
+  /** Set to `code` when the status is `archived` because the Wasm entry expired, not the instance. */
+  archivedEntry?: 'code';
   /** The latest ledger the RPC reported on that lookup, so the two can be compared. */
   latestLedger?: number;
   /** Label of the supported version the live hash matched, when it has one. */

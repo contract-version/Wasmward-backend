@@ -1,4 +1,4 @@
-import { effectiveStatus, ledgersUntilExpiry } from './state.js';
+import { effectiveStatus, expiringEntry, ledgersUntilExpiry } from './state.js';
 import type { ContractState, Status } from './types.js';
 
 export interface ContractHealth {
@@ -8,8 +8,13 @@ export interface ContractHealth {
   /** True only when `status` is `supported`. */
   writable: boolean;
   liveWasmHash?: string;
-  /** Ledgers the instance had left at the last check. About 5 seconds each; a snapshot, not a countdown. */
+  /**
+   * Ledgers the contract had left at the last check: the smaller of the instance's and the Wasm code's, which
+   * expire separately. About 5 seconds each; a snapshot, not a countdown.
+   */
   ledgersUntilExpiry?: number;
+  /** Which of the two `ledgersUntilExpiry` counts down to, so you know what to extend. */
+  expiringEntry?: 'instance' | 'code';
   matchedLabel?: string;
   lastCheckedAt?: number;
   lastSuccessAt?: number;
@@ -55,6 +60,8 @@ export function buildHealth(
     if (state.liveWasmHash !== undefined) entry.liveWasmHash = state.liveWasmHash;
     const remaining = ledgersUntilExpiry(state);
     if (remaining !== undefined) entry.ledgersUntilExpiry = remaining;
+    const expiring = expiringEntry(state);
+    if (expiring !== undefined) entry.expiringEntry = expiring;
     if (state.matchedLabel !== undefined) entry.matchedLabel = state.matchedLabel;
     if (state.lastCheckedAt !== undefined) entry.lastCheckedAt = state.lastCheckedAt;
     if (state.lastSuccessAt !== undefined) entry.lastSuccessAt = state.lastSuccessAt;

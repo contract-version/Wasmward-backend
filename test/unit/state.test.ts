@@ -3,6 +3,7 @@ import {
   describeBlock,
   describeTimeLeft,
   effectiveStatus,
+  expiringEntry,
   EXPIRY_WARNING_LEDGERS,
   initialState,
   isWritable,
@@ -51,7 +52,7 @@ function withoutLastSuccess(state: ContractState): ContractState {
   return copy;
 }
 
-const wasm = (wasmHash: string): LiveExecutable => ({ kind: 'wasm', wasmHash, liveUntilLedger: 9_000, latestLedger: 100 });
+const wasm = (wasmHash: string): LiveExecutable => ({ kind: 'wasm', wasmHash, liveUntilLedger: 9_000, codeLiveUntilLedger: 9_000, latestLedger: 100 });
 const error: LiveExecutable = { kind: 'error', message: 'rpc down' };
 
 describe('initialState', () => {
@@ -101,6 +102,7 @@ describe('nextState: successful lookups, from every previous status', () => {
           expected.liveUntilLedger = expiry[0];
           expected.latestLedger = expiry[1];
         }
+        if (result.kind === 'wasm') expected.codeLiveUntilLedger = result.codeLiveUntilLedger;
         // toStrictEqual also proves cleared fields are absent, not set to undefined.
         expect(next).toStrictEqual(expected);
       });
@@ -331,7 +333,7 @@ describe('describeBlock', () => {
 
 describe('when the instance expires', () => {
   it('is remembered from a lookup that found an instance, and replaces what was there', () => {
-    const next = nextState(stateWith('supported'), { kind: 'wasm', wasmHash: V1, liveUntilLedger: 5_000, latestLedger: 1_000 }, cfg, NOW, MAX);
+    const next = nextState(stateWith('supported'), { kind: 'wasm', wasmHash: V1, liveUntilLedger: 5_000, codeLiveUntilLedger: 5_000, latestLedger: 1_000 }, cfg, NOW, MAX);
     expect(next).toMatchObject({ liveUntilLedger: 5_000, latestLedger: 1_000 });
   });
 
@@ -347,6 +349,7 @@ describe('when the instance expires', () => {
     ] as const) {
       const next = nextState(stateWith('supported'), result, cfg, NOW, MAX);
       expect(next).not.toHaveProperty('liveUntilLedger');
+      expect(next).not.toHaveProperty('codeLiveUntilLedger');
       expect(next).not.toHaveProperty('latestLedger');
     }
   });
@@ -378,5 +381,69 @@ describe('when the instance expires', () => {
     expect(SECONDS_PER_LEDGER).toBe(5);
     expect(EXPIRY_WARNING_LEDGERS).toBe(120_960);
     expect(describeTimeLeft(EXPIRY_WARNING_LEDGERS)).toBe('about 7 days');
+  });
+});
+
+describe('the Wasm code entry expires separately from the instance', () => {
+  const codeExpired: LiveExecutable = { kind: 'archived', entry: 'code', wasmHash: V1, liveUntilLedger: 90, latestLedger: 100 };
+
+  it('is remembered next to the instance expiry from a lookup that found Wasm', () => {
+    const next = nextState(stateWith('supported'), { kind: 'wasm', wasmHash: V1, liveUntilLedger: 5_000, codeLiveUntilLedger: 2_000, latestLedger: 1_000 }, cfg, NOW, MAX);
+    expect(next).toMatchObject({ status: 'supported', liveUntilLedger: 5_000, codeLiveUntilLedger: 2_000 });
+  });
+
+  it('blocks writes as archived when the code entry has expired, and says which entry', () => {
+    const next = nextState(stateWith('supported'), codeExpired, cfg, NOW, MAX);
+    expect(next).toMatchObject({ status: 'archived', archivedEntry: 'code', liveWasmHash: V1, codeLiveUntilLedger: 90, latestLedger: 100 });
+    // The instance expiry from the earlier lookup is not carried over: this lookup says nothing about it.
+    expect(next).not.toHaveProperty('liveUntilLedger');
+    expect(isWritable(next, NOW, MAX)).toBe(false);
+  });
+
+  it('still blocks when the code entry was not found at all, and then has no expiry to show', () => {
+    const next = nextState(stateWith('supported'), { kind: 'archived', entry: 'code', wasmHash: V1, latestLedger: 100 }, cfg, NOW, MAX);
+    expect(next).toMatchObject({ status: 'archived', archivedEntry: 'code', liveWasmHash: V1 });
+    expect(next).not.toHaveProperty('codeLiveUntilLedger');
+    expect(ledgersUntilExpiry(next)).toBeUndefined();
+  });
+
+  it('forgets the code expiry flag once the code is live again', () => {
+    const archived = nextState(stateWith('supported'), codeExpired, cfg, NOW, MAX);
+    const restored = nextState(archived, wasm(V1), cfg, NOW + 1, MAX);
+    expect(restored.status).toBe('supported');
+    expect(restored).not.toHaveProperty('archivedEntry');
+  });
+
+  it('does not mark an expired instance as a code problem', () => {
+    const next = nextState(stateWith('supported'), { kind: 'archived', liveUntilLedger: 5, latestLedger: 100 }, cfg, NOW, MAX);
+    expect(next.status).toBe('archived');
+    expect(next).not.toHaveProperty('archivedEntry');
+    expect(next).not.toHaveProperty('codeLiveUntilLedger');
+  });
+
+  it('explains each kind of archive in its own words', () => {
+    const code = nextState(stateWith('supported'), codeExpired, cfg, NOW, MAX);
+    const instance = nextState(stateWith('supported'), { kind: 'archived', liveUntilLedger: 5, latestLedger: 100 }, cfg, NOW, MAX);
+    expect(describeBlock(code, NOW, MAX)).toMatch(/Wasm code .* expired/);
+    expect(describeBlock(instance, NOW, MAX)).toMatch(/instance has expired/);
+  });
+
+  it('counts down to whichever entry expires first', () => {
+    const base = { liveUntilLedger: 5_000, codeLiveUntilLedger: 2_000, latestLedger: 1_000 };
+    expect(ledgersUntilExpiry(stateWith('supported', base))).toBe(1_000);
+    expect(expiringEntry(stateWith('supported', base))).toBe('code');
+    const later = { ...base, codeLiveUntilLedger: 9_000 };
+    expect(ledgersUntilExpiry(stateWith('supported', later))).toBe(4_000);
+    expect(expiringEntry(stateWith('supported', later))).toBe('instance');
+  });
+
+  it('names the instance when both end on the same ledger, and when only one is known', () => {
+    expect(expiringEntry(stateWith('supported', { liveUntilLedger: 5_000, codeLiveUntilLedger: 5_000 }))).toBe('instance');
+    expect(expiringEntry(stateWith('supported', { liveUntilLedger: 5_000 }))).toBe('instance');
+    const codeOnly = stateWith('archived', { codeLiveUntilLedger: 90 });
+    delete codeOnly.liveUntilLedger;
+    expect(expiringEntry(codeOnly)).toBe('code');
+    expect(ledgersUntilExpiry(codeOnly)).toBe(0); // 90 is behind the latest ledger, 700, and never goes below zero
+    expect(expiringEntry(initialState('vault', cfg))).toBeUndefined();
   });
 });

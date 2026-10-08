@@ -15,6 +15,7 @@ export type { Poller, PollerOptions } from './poller.js';
 export {
   describeTimeLeft,
   effectiveStatus,
+  expiringEntry,
   EXPIRY_WARNING_LEDGERS,
   initialState,
   isWritable,
