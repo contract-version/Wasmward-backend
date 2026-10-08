@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { describeBlock, effectiveStatus, initialState, isWritable, nextState } from '../../src/state.js';
+import {
+  describeBlock,
+  describeTimeLeft,
+  effectiveStatus,
+  EXPIRY_WARNING_LEDGERS,
+  initialState,
+  isWritable,
+  ledgersUntilExpiry,
+  nextState,
+  SECONDS_PER_LEDGER,
+} from '../../src/state.js';
 import type { ContractConfig, ContractState, LiveExecutable, Status } from '../../src/types.js';
 import { contractIdOf, hashOf } from '../fixtures/ledger.js';
 
@@ -23,6 +33,8 @@ function stateWith(status: Status, overrides: Partial<ContractState> = {}): Cont
     contractId: cfg.contractId,
     status,
     liveWasmHash: V1,
+    liveUntilLedger: 777,
+    latestLedger: 700,
     matchedLabel: 'v1.0.0',
     lastCheckedAt: NOW - 1_000,
     lastSuccessAt: NOW - 1_000,
@@ -54,22 +66,23 @@ describe('initialState', () => {
 });
 
 describe('nextState: successful lookups, from every previous status', () => {
-  const cases: { name: string; result: LiveExecutable; status: Status; hash?: string; label?: string }[] = [
-    { name: 'a supported hash with a label', result: wasm(V1), status: 'supported', hash: V1, label: 'v1.0.0' },
-    { name: 'a supported hash without a label', result: wasm(V2), status: 'supported', hash: V2 },
-    { name: 'an unknown hash', result: wasm(UNKNOWN), status: 'unsupported', hash: UNKNOWN },
+  const cases: { name: string; result: LiveExecutable; status: Status; hash?: string; label?: string; expiry?: [number, number] }[] = [
+    { name: 'a supported hash with a label', result: wasm(V1), status: 'supported', hash: V1, label: 'v1.0.0', expiry: [9_000, 100] },
+    { name: 'a supported hash without a label', result: wasm(V2), status: 'supported', hash: V2, expiry: [9_000, 100] },
+    { name: 'an unknown hash', result: wasm(UNKNOWN), status: 'unsupported', hash: UNKNOWN, expiry: [9_000, 100] },
     { name: 'a Stellar Asset Contract', result: { kind: 'stellar-asset', latestLedger: 100 }, status: 'stellar-asset' },
     { name: 'a missing instance', result: { kind: 'missing', latestLedger: 100 }, status: 'missing' },
     {
       name: 'an archived instance',
       result: { kind: 'archived', liveUntilLedger: 5, latestLedger: 100 },
       status: 'archived',
+      expiry: [5, 100],
     },
   ];
 
   for (const previous of ALL_STATUSES) {
     describe(`from ${previous}`, () => {
-      it.each(cases)('$name becomes the right status and resets bookkeeping', ({ result, status, hash, label }) => {
+      it.each(cases)('$name becomes the right status and resets bookkeeping', ({ result, status, hash, label, expiry }) => {
         const prev = previous === 'pending' ? withoutLastSuccess(stateWith('pending')) : stateWith(previous);
         const next = nextState(prev, result, cfg, NOW, MAX);
 
@@ -83,6 +96,11 @@ describe('nextState: successful lookups, from every previous status', () => {
         };
         if (hash !== undefined) expected.liveWasmHash = hash;
         if (label !== undefined) expected.matchedLabel = label;
+        // The old expiry is replaced when an instance was found and cleared when none was.
+        if (expiry !== undefined) {
+          expected.liveUntilLedger = expiry[0];
+          expected.latestLedger = expiry[1];
+        }
         // toStrictEqual also proves cleared fields are absent, not set to undefined.
         expect(next).toStrictEqual(expected);
       });
@@ -308,5 +326,57 @@ describe('describeBlock', () => {
 
   it('says the live code is supported when it is', () => {
     expect(describeAt(stateWith('supported', { lastSuccessAt: NOW }))).toBe('the live code is supported');
+  });
+});
+
+describe('when the instance expires', () => {
+  it('is remembered from a lookup that found an instance, and replaces what was there', () => {
+    const next = nextState(stateWith('supported'), { kind: 'wasm', wasmHash: V1, liveUntilLedger: 5_000, latestLedger: 1_000 }, cfg, NOW, MAX);
+    expect(next).toMatchObject({ liveUntilLedger: 5_000, latestLedger: 1_000 });
+  });
+
+  it('is kept when a lookup errors, so the last known value stays available', () => {
+    const next = nextState(stateWith('supported'), error, cfg, NOW, MAX);
+    expect(next).toMatchObject({ liveUntilLedger: 777, latestLedger: 700 });
+  });
+
+  it('is cleared when no instance was found', () => {
+    for (const result of [
+      { kind: 'missing', latestLedger: 100 },
+      { kind: 'stellar-asset', latestLedger: 100 },
+    ] as const) {
+      const next = nextState(stateWith('supported'), result, cfg, NOW, MAX);
+      expect(next).not.toHaveProperty('liveUntilLedger');
+      expect(next).not.toHaveProperty('latestLedger');
+    }
+  });
+
+  it('gives the ledgers left, never below zero, and nothing when unknown', () => {
+    expect(ledgersUntilExpiry(stateWith('supported', { liveUntilLedger: 5_000, latestLedger: 1_000 }))).toBe(4_000);
+    expect(ledgersUntilExpiry(stateWith('supported', { liveUntilLedger: 5, latestLedger: 100 }))).toBe(0);
+    expect(ledgersUntilExpiry(stateWith('supported', { liveUntilLedger: 100, latestLedger: 100 }))).toBe(0);
+    expect(ledgersUntilExpiry(initialState('vault', cfg))).toBeUndefined();
+    const half = stateWith('supported', { liveUntilLedger: 5_000 });
+    delete half.latestLedger;
+    expect(ledgersUntilExpiry(half)).toBeUndefined();
+  });
+
+  it.each([
+    [0, 'less than an hour'],
+    [719, 'less than an hour'], // 3,595 s
+    [720, 'about 1 hours'], // exactly an hour
+    [8_640, 'about 12 hours'],
+    [34_559, 'about 48 hours'], // just under 2 days
+    [34_560, 'about 2 days'],
+    [120_960, 'about 7 days'],
+    [1_000_000, 'about 58 days'],
+  ])('describes %i ledgers as %s', (ledgers, expected) => {
+    expect(describeTimeLeft(ledgers)).toBe(expected);
+  });
+
+  it('warns below about a week, and the constants agree', () => {
+    expect(SECONDS_PER_LEDGER).toBe(5);
+    expect(EXPIRY_WARNING_LEDGERS).toBe(120_960);
+    expect(describeTimeLeft(EXPIRY_WARNING_LEDGERS)).toBe('about 7 days');
   });
 });
