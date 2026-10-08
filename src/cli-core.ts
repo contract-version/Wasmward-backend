@@ -2,10 +2,11 @@ import { randomBytes } from 'node:crypto';
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
+import type { ConfigDocument } from './config.js';
 import { ConfigError } from './errors.js';
 import type { GuardServer } from './guard.js';
 import { hashWasm } from './hash.js';
-import { buildHealth } from './health.js';
+import { buildHealth, type HealthReport } from './health.js';
 import { describeBlock, initialState, nextState } from './state.js';
 import type { ContractState, WasmwardConfig } from './types.js';
 
@@ -26,14 +27,15 @@ const MAX_LOOKUP_TIMEOUT_MS = 10_000;
 
 const USAGE = `Usage:
   wasmward hash <file.wasm> [--json]
-  wasmward add <name> <file.wasm> --label <label> [--config <path>] [--json]
-  wasmward check [--config <path>] [--json]
-  wasmward watch [--config <path>] [--json]
+  wasmward add <name> <file.wasm> --label <label> [--config <path>] [--network <name>] [--json]
+  wasmward check [--config <path>] [--network <name>] [--json]
+  wasmward watch [--config <path>] [--network <name>] [--json]
 
 Commands:
   hash    Print the lowercase SHA-256 hash of a Wasm file.
   add     Add a Wasm file's hash to a contract's supported list in the config.
   check   Look up the live code of every configured contract and report its status.
+          With a multi-network config and no --network, every network is checked.
   watch   Keep checking and print each status change until interrupted (Ctrl+C).
 
 Exit codes:
@@ -44,6 +46,7 @@ Exit codes:
 
 Options:
   --config <path>  Config file (default ${DEFAULT_CONFIG_PATH})
+  --network <name> Which network, for a config with a "networks" section
   --label <label>  Label for the version being added
   --json           Machine-readable output
   -h, --help       Show this help
@@ -121,10 +124,41 @@ async function readRawConfig(path: string): Promise<Record<string, unknown>> {
   } catch (error) {
     throw new ConfigError(`Config file ${path} is not valid JSON: ${messageOf(error)}`);
   }
-  // Validate before touching anything; this throws a ConfigError naming every problem.
-  const { loadConfig } = await loadConfigModule();
-  loadConfig(parsed, { source: path });
+  // Validate before touching anything; this throws a ConfigError naming every problem, in every network.
+  const { loadConfigDocument } = await loadConfigModule();
+  loadConfigDocument(parsed, { source: path });
   return parsed as Record<string, unknown>;
+}
+
+/**
+ * Picks the network a command acts on. It never guesses between several: choosing for the user could
+ * point a command at mainnet when it meant testnet. A single network is used as is, and naming one for a
+ * single-network file is an error, for the same reason.
+ */
+function selectNetwork(
+  document: ConfigDocument,
+  requested: string | undefined,
+): { name: string | undefined; config: WasmwardConfig } {
+  if (document.kind === 'single') {
+    if (requested !== undefined) {
+      throw new CliError(`This config describes a single network, so --network ${requested} does not apply.`);
+    }
+    return { name: undefined, config: document.config };
+  }
+  const names = Object.keys(document.networks);
+  if (requested === undefined) {
+    const only = names.length === 1 ? names[0] : undefined;
+    const config = only === undefined ? undefined : document.networks[only];
+    if (only === undefined || config === undefined) {
+      throw new CliError(`This config describes ${names.length} networks (${names.join(', ')}); choose one with --network <name>.`);
+    }
+    return { name: only, config };
+  }
+  const config = Object.hasOwn(document.networks, requested) ? document.networks[requested] : undefined;
+  if (config === undefined) {
+    throw new CliError(`Unknown network '${requested}'. This config has: ${names.join(', ')}.`);
+  }
+  return { name: requested, config };
 }
 
 function jsonLine(value: unknown): string {
@@ -141,50 +175,61 @@ async function hashCommand(files: string[], json: boolean, io: CliIo): Promise<n
 
 async function addCommand(
   positionals: string[],
-  options: { config: string; label: string | undefined; json: boolean },
+  options: { config: string; network: string | undefined; label: string | undefined; json: boolean },
   io: CliIo,
 ): Promise<number> {
   const [name, file, ...extra] = positionals;
   if (name === undefined || file === undefined || extra.length > 0) {
-    throw new CliError('Usage: wasmward add <name> <file.wasm> --label <label> [--config <path>]');
+    throw new CliError('Usage: wasmward add <name> <file.wasm> --label <label> [--config <path>] [--network <name>]');
   }
   if (options.label === undefined) throw new CliError('--label is required, for example --label v1.2.0');
 
   const raw = await readRawConfig(options.config);
-  const { loadConfig } = await loadConfigModule();
-  const current = loadConfig(raw);
+  const { loadConfigDocument } = await loadConfigModule();
+  const document = loadConfigDocument(raw);
+  const { name: networkName, config: current } = selectNetwork(document, options.network);
+  const where = networkName === undefined ? '' : ` on ${networkName}`;
+
   const contract = Object.hasOwn(current.contracts, name) ? current.contracts[name] : undefined;
   if (contract === undefined) {
-    throw new CliError(`Unknown contract '${name}'. Configured contracts: ${Object.keys(current.contracts).join(', ')}.`);
+    throw new CliError(`Unknown contract '${name}'${where}. Configured contracts: ${Object.keys(current.contracts).join(', ')}.`);
   }
 
   const wasmHash = await hashWasm(await readWasm(file));
   const existing = contract.supported.find((version) => version.wasmHash === wasmHash);
   if (existing !== undefined) {
     const as = existing.label === undefined ? '' : ` as '${existing.label}'`;
-    throw new CliError(`${wasmHash} is already supported for '${name}'${as}. Nothing was changed.`);
+    throw new CliError(`${wasmHash} is already supported for '${name}'${where}${as}. Nothing was changed.`);
   }
 
   // Edit the raw document, not the loaded one, so the file keeps its own key order and omits defaults.
-  const rawContract = (raw['contracts'] as Record<string, { supported: unknown[] }>)[name];
+  const section =
+    networkName === undefined ? raw : (raw['networks'] as Record<string, Record<string, unknown>>)[networkName];
+  const rawContract = (section?.['contracts'] as Record<string, { supported: unknown[] }> | undefined)?.[name];
   rawContract?.supported.push({ wasmHash, label: options.label });
-  loadConfig(raw, { source: `${options.config} (with the new version)` });
+  loadConfigDocument(raw, { source: `${options.config} (with the new version)` });
 
   await writeFileAtomic(options.config, `${JSON.stringify(raw, null, 2)}\n`);
   io.stdout(
     options.json
-      ? jsonLine({ contract: name, wasmHash, label: options.label, config: options.config })
-      : `Added ${options.label} (${wasmHash}) to '${name}' in ${options.config}\n`,
+      ? jsonLine({
+          contract: name,
+          ...(networkName === undefined ? {} : { network: networkName }),
+          wasmHash,
+          label: options.label,
+          config: options.config,
+        })
+      : `Added ${options.label} (${wasmHash}) to '${name}'${where} in ${options.config}\n`,
   );
   return EXIT_OK;
 }
 
-async function watchCommand(options: { config: string; json: boolean }, io: CliIo): Promise<number> {
+async function watchCommand(options: { config: string; network: string | undefined; json: boolean }, io: CliIo): Promise<number> {
   const signal = io.signal;
   if (signal === undefined) throw new CliError('Internal error: watch needs a signal to know when to stop.');
-  const { loadConfigFile } = await loadNodeModule();
+  const { loadConfigDocumentFile } = await loadNodeModule();
   const { createVersionGuard } = await loadGuardModule();
-  const config = await loadConfigFile(options.config);
+  const { name: networkName, config } = selectNetwork(await loadConfigDocumentFile(options.config), options.network);
   const now = io.now ?? Date.now;
   const server = await (io.createServer ?? defaultServer)(config);
   const guard = createVersionGuard(config, { server, now });
@@ -194,6 +239,7 @@ async function watchCommand(options: { config: string; json: boolean }, io: CliI
     const reason = state.status === 'supported' ? undefined : describeBlock(state, now(), config.maxStalenessMs);
     if (options.json) {
       const line: Record<string, unknown> = { time: at, contract: state.name, from, to: state.status };
+      if (networkName !== undefined) line['network'] = networkName;
       if (state.liveWasmHash !== undefined) line['liveWasmHash'] = state.liveWasmHash;
       if (state.matchedLabel !== undefined) line['matchedLabel'] = state.matchedLabel;
       if (reason !== undefined) line['reason'] = reason;
@@ -202,7 +248,8 @@ async function watchCommand(options: { config: string; json: boolean }, io: CliI
     }
     const detail =
       reason ?? `${state.liveWasmHash ?? ''}${state.matchedLabel === undefined ? '' : ` (${state.matchedLabel})`}`;
-    io.stdout(`${at} ${state.name}: ${from} -> ${state.status}  ${detail}
+    const label = networkName === undefined ? state.name : `${networkName}/${state.name}`;
+    io.stdout(`${at} ${label}: ${from} -> ${state.status}  ${detail}
 `);
   };
 
@@ -216,7 +263,7 @@ async function watchCommand(options: { config: string; json: boolean }, io: CliI
   for (const state of Object.values(guard.status())) {
     if (state.status === 'pending') report(state, 'pending');
   }
-  if (!options.json) io.stderr(`Watching ${Object.keys(config.contracts).length} contract(s). Press Ctrl+C to stop.
+  if (!options.json) io.stderr(`Watching ${Object.keys(config.contracts).length} contract(s)${networkName === undefined ? '' : ` on ${networkName}`}. Press Ctrl+C to stop.
 `);
 
   if (!signal.aborted) {
@@ -244,10 +291,16 @@ function renderCheck(states: ContractState[], config: WasmwardConfig, now: numbe
   return `${lines.join('\n')}\n`;
 }
 
-async function checkCommand(options: { config: string; json: boolean }, io: CliIo): Promise<number> {
-  const { loadConfigFile } = await loadNodeModule();
+interface CheckOutcome {
+  exitCode: number;
+  text: string;
+  report: HealthReport;
+  lookupFailed: boolean;
+}
+
+/** Checks one network. Throws {@link CliError} or {@link ConfigError} when it cannot even be reached. */
+async function checkNetwork(config: WasmwardConfig, io: CliIo): Promise<CheckOutcome> {
   const { createEndpointSet } = await loadEndpointsModule();
-  const config = await loadConfigFile(options.config);
   const servers = [
     await (io.createServer ?? defaultServer)(config),
     ...(await (io.createFallbackServers ?? defaultFallbackServers)(config)),
@@ -256,7 +309,7 @@ async function checkCommand(options: { config: string; json: boolean }, io: CliI
   const timeoutMs = Math.min(config.pollIntervalMs, MAX_LOOKUP_TIMEOUT_MS);
   const endpoints = createEndpointSet(servers, config.network.passphrase, timeoutMs);
 
-  // A wrong network is a ConfigError and ends the command with exit code 2; so does an unreachable RPC.
+  // A wrong network is a ConfigError and ends the check with exit code 2; so does an unreachable RPC.
   try {
     await endpoints.verifyNetwork();
   } catch (error) {
@@ -281,20 +334,67 @@ async function checkCommand(options: { config: string; json: boolean }, io: CliI
   // error (2) rather than as "not supported" (1), since the contract might well be fine.
   const lookupFailed = states.some((state) => state.lastError !== undefined);
   const allSupported = states.every((state) => state.status === 'supported');
-  const exitCode = lookupFailed ? EXIT_ERROR : allSupported ? EXIT_OK : EXIT_NOT_SUPPORTED;
-
-  if (options.json) {
-    const report = buildHealth(states, {
+  return {
+    exitCode: lookupFailed ? EXIT_ERROR : allSupported ? EXIT_OK : EXIT_NOT_SUPPORTED,
+    text: renderCheck(states, config, startedAt),
+    report: buildHealth(states, {
       passphrase: config.network.passphrase,
       networkVerified: true,
       usingFallback: endpoints.usingFallback,
       now: startedAt,
       maxStalenessMs: config.maxStalenessMs,
-    });
-    io.stdout(jsonLine({ ...report, exitCode }));
+    }),
+    lookupFailed,
+  };
+}
+
+const LOOKUP_FAILED_NOTE = 'Some contracts could not be looked up; see the messages above.\n';
+
+async function checkCommand(options: { config: string; network: string | undefined; json: boolean }, io: CliIo): Promise<number> {
+  const { loadConfigDocumentFile } = await loadNodeModule();
+  const document = await loadConfigDocumentFile(options.config);
+
+  // One network, chosen by the file or by --network: errors end the command with exit code 2.
+  if (document.kind === 'single' || options.network !== undefined) {
+    const { config } = selectNetwork(document, options.network);
+    const outcome = await checkNetwork(config, io);
+    if (options.json) {
+      io.stdout(jsonLine({ ...outcome.report, exitCode: outcome.exitCode }));
+    } else {
+      io.stdout(outcome.text);
+      if (outcome.lookupFailed) io.stderr(LOOKUP_FAILED_NOTE);
+    }
+    return outcome.exitCode;
+  }
+
+  // Several networks and none chosen: check them all. One network failing does not hide the others.
+  const results: { name: string; outcome?: CheckOutcome; error?: string }[] = [];
+  for (const [name, config] of Object.entries(document.networks)) {
+    try {
+      results.push({ name, outcome: await checkNetwork(config, io) });
+    } catch (error) {
+      if (!(error instanceof CliError) && !(error instanceof ConfigError)) throw error;
+      results.push({ name, error: error.message });
+    }
+  }
+  // 2 (could not check) outranks 1 (not supported), which outranks 0.
+  const exitCode = Math.max(...results.map((result) => (result.outcome === undefined ? EXIT_ERROR : result.outcome.exitCode)));
+
+  if (options.json) {
+    const networks: Record<string, unknown> = {};
+    for (const { name, outcome, error } of results) {
+      networks[name] =
+        outcome === undefined
+          ? { ok: false, error, exitCode: EXIT_ERROR }
+          : { ...outcome.report, exitCode: outcome.exitCode };
+    }
+    const ok = results.every((result) => result.outcome?.report.ok === true);
+    io.stdout(jsonLine({ ok, exitCode, networks }));
   } else {
-    io.stdout(renderCheck(states, config, startedAt));
-    if (lookupFailed) io.stderr('Some contracts could not be looked up; see the messages above.\n');
+    for (const { name, outcome, error } of results) {
+      io.stdout(`== ${name} ==\n${outcome === undefined ? `could not be checked: ${error}\n` : outcome.text}`);
+    }
+    if (results.some((result) => result.outcome === undefined || result.outcome.lookupFailed)) io.stderr(LOOKUP_FAILED_NOTE);
   }
   return exitCode;
 }
@@ -332,13 +432,13 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
       case 'hash':
         return await hashCommand(rest, values.json === true, io);
       case 'add':
-        return await addCommand(rest, { config, label: values.label, json: values.json === true }, io);
+        return await addCommand(rest, { config, network: values.network, label: values.label, json: values.json === true }, io);
       case 'check':
-        if (rest.length > 0) throw new CliError('Usage: wasmward check [--config <path>] [--json]');
-        return await checkCommand({ config, json: values.json === true }, io);
+        if (rest.length > 0) throw new CliError('Usage: wasmward check [--config <path>] [--network <name>] [--json]');
+        return await checkCommand({ config, network: values.network, json: values.json === true }, io);
       case 'watch':
-        if (rest.length > 0) throw new CliError('Usage: wasmward watch [--config <path>] [--json]');
-        return await watchCommand({ config, json: values.json === true }, io);
+        if (rest.length > 0) throw new CliError('Usage: wasmward watch [--config <path>] [--network <name>] [--json]');
+        return await watchCommand({ config, network: values.network, json: values.json === true }, io);
       default:
         throw new CliError(`Unknown command '${command}'.\n\n${USAGE.trimEnd()}`);
     }
@@ -356,6 +456,7 @@ function parseCommandLine(argv: string[]) {
     strict: true,
     options: {
       config: { type: 'string' },
+      network: { type: 'string' },
       label: { type: 'string' },
       json: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
