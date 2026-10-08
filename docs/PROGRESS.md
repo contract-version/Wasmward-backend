@@ -304,3 +304,14 @@
 **Results**
 - `pnpm test:coverage`: 514 tests pass (15 new), 99.7% lines; typecheck, lint and build clean.
 - Live testnet with real clocks: stale announced 10,007 ms after the last good check against a 10,000 ms limit.
+
+## Extra: `wasmward init`
+
+**Date:** 2026-10-08
+
+**Built**
+- `wasmward init <name> <contract-id>` with `--preset`, `--rpc-url`, `--passphrase`, `--wasm`, `--label`, `--config`, `--json`. Starts from a Wasm file or, with a warning, from the live code; refuses anything it cannot protect; never overwrites (D-021).
+
+**Results**
+- `pnpm test:coverage`: 554 tests pass (40 new), 99.6% lines; typecheck, lint and build clean.
+- Live testnet: `init` from the chain and `init --wasm` on the local build gave the identical hash; `check` passed on the result; re-running `init` refused.

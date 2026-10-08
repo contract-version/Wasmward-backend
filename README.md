@@ -70,6 +70,7 @@ In a browser, use `loadConfig` and `guard.subscribe` directly. A complete, runna
 ## Command line
 
 ```bash
+npx wasmward init vault C... --preset testnet --wasm build/contract.wasm   # create wasmward.json
 npx wasmward hash build/contract.wasm                    # print a Wasm file's SHA-256
 npx wasmward add vault build/contract.wasm --label v2    # add it to wasmward.json
 npx wasmward check                                       # exit 0 only if every contract is supported
@@ -78,7 +79,9 @@ npx wasmward watch                                       # print each status cha
 
 One file can describe several networks (for example testnet and mainnet); pass `--network <name>` to pick one. [Details](docs/OPERATIONS.md#several-networks-in-one-config-file).
 
-`check` is meant for a deploy pipeline: run it before releasing an app build to confirm the build's config matches the live contracts. Exit code 0 means all supported, 1 means at least one is not, 2 means invalid input or the network could not be checked. `watch` keeps checking and prints a line whenever a contract's status changes, which is handy while rehearsing an upgrade. Add `--json` for machine-readable output (one JSON object per line for `watch`).
+`check` is meant for a deploy pipeline: run it before releasing an app build to confirm the build's config matches the live contracts. Exit code 0 means all supported, 1 means at least one is not, 2 means invalid input or the network could not be checked. `init` writes a new `wasmward.json` for one contract and never overwrites an existing file. Start it from a build you trust with `--wasm`; without `--wasm` it reads the code that is live on the network now, which means trusting the RPC and whoever deployed it (it says so). [Details](docs/OPERATIONS.md#starting-a-config).
+
+`watch` keeps checking and prints a line whenever a contract's status changes, which is handy while rehearsing an upgrade. Add `--json` for machine-readable output (one JSON object per line for `watch`).
 
 ## API overview
 

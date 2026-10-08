@@ -16,6 +16,7 @@ First release. Set the date when the version is tagged.
 - `createVersionGuard`: `start`, `stop`, `status`, `isWritable`, `assertWritable`, `assertWritableFresh`, `guard` (a function wrapper), `subscribe` (change callbacks) and `health` (framework-neutral JSON). It verifies the network passphrase before it starts.
 - `WriteBlockedError` and `ConfigError`.
 - The `wasmward` command line tool with `hash`, `add` and `check`. `check` exits 0 when every contract is supported, 1 when any is not, and 2 on a configuration or network error. Config writes are atomic.
+- `wasmward init`: creates a config for one contract, starting from a Wasm file (`--wasm`) or, with a clear warning about the trust involved, from the code that is live on the network. Never overwrites an existing file.
 - `wasmward watch`: keeps checking and prints each status change, as text or JSON lines, until interrupted with Ctrl+C or SIGTERM.
 - Several networks in one config file: a `networks` section whose entries have the single-network shape. Choosing a network is always explicit (`loadConfig(file, { network })`, `--network <name>`), and `wasmward check` without `--network` checks every network. Adds `loadConfigDocument`, `loadConfigDocumentFile` and the `ConfigDocument` type.
 - `subscribe` now announces `supported -> stale` the moment it happens, using a timer, instead of at the next poll. `pollIntervalMs` is limited to one day, and no poll or staleness delay can exceed what a timer can wait.

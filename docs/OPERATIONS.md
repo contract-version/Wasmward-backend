@@ -2,6 +2,25 @@
 
 How to run Wasmward safely in production, and what it cannot do.
 
+## Starting a config
+
+`wasmward init` creates a config for one contract so you do not have to write the JSON by hand:
+
+```bash
+# From a build you trust (recommended). Needs no network access.
+npx wasmward init vault C... --preset testnet --wasm build/contract.wasm --label v1.0.0
+
+# From the code that is live right now.
+npx wasmward init vault C... --preset testnet
+```
+
+- **Pick the network** with `--preset testnet` (the public testnet RPC is built in) or `--preset mainnet` (you must add `--rpc-url`, because there is no public mainnet RPC to default to). For anything else give both `--rpc-url` and `--passphrase`. `--rpc-url` may also replace a preset's address.
+- **Choose where the first hash comes from.** With `--wasm` it is the hash of that file, with no network involved. Without it, `init` verifies the network, reads the contract's live Wasm hash and starts from that. That is a decision to **trust whatever is deployed today**, and the RPC's word for it. `init` says so every time. If you have the build that should be live, use `--wasm` and then run `wasmward check` to confirm the chain agrees.
+- **It refuses to start from anything it cannot use:** a contract that does not exist, an expired instance, a Stellar Asset Contract, an unreachable RPC, or an RPC serving a different network all end with exit code 2 and no file.
+- **It never overwrites.** If the file exists it stops before doing any network work. The file is created whole or not at all, and two simultaneous runs cannot clobber each other.
+- The first version is labelled `initial` unless you pass `--label`.
+- `init` writes the single-network format. To describe several networks, edit the file as described under [Several networks in one config file](#several-networks-in-one-config-file).
+
 ## Recommended settings
 
 | Setting | Default | Guidance |
