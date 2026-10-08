@@ -94,6 +94,7 @@ Only the `supported` status allows writes. See [docs/API.md](docs/API.md) for ev
 - It does not stop a write in the moment between an upgrade and the next check. Use `assertWritableFresh` for high-value writes, and simulate transactions before submitting them. [docs/OPERATIONS.md](docs/OPERATIONS.md) explains the limits.
 - It does not analyse whether two builds are compatible. That is a decision you make by adding a hash to your config.
 - It does not send alerts. Use `guard.subscribe` to wire your own.
+- It does not make one RPC outage harmless unless you list spare endpoints in `network.fallbackRpcUrls`; see [docs/OPERATIONS.md](docs/OPERATIONS.md#using-more-than-one-rpc-endpoint).
 
 ## Documentation
 

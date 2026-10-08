@@ -27,6 +27,7 @@ await deposit(amount); // throws WriteBlockedError if the live code is not suppo
   "version": 1,
   "network": {
     "rpcUrl": "https://soroban-testnet.stellar.org",
+    "fallbackRpcUrls": [],
     "passphrase": "Test SDF Network ; September 2015"
   },
   "pollIntervalMs": 30000,
@@ -44,7 +45,8 @@ await deposit(amount); // throws WriteBlockedError if the live code is not suppo
 |---|---|
 | `version` | Must equal `1`. |
 | `network.rpcUrl` | `https`, or `http` only for `localhost` or `127.0.0.1`. |
-| `network.passphrase` | Non-empty. `start()` fails if the RPC reports a different one. |
+| `network.fallbackRpcUrls` | Optional list of up to 4 more RPC URLs, tried in order when the primary cannot answer. Same https rule; no repeats of `rpcUrl` or each other. Default `[]`. See [Using more than one RPC endpoint](OPERATIONS.md#using-more-than-one-rpc-endpoint). |
+| `network.passphrase` | Non-empty. `start()` fails if the RPC reports a different one. Every fallback must report the same one before it is used. |
 | `pollIntervalMs` | Integer, at least 5000. Default 30000. |
 | `maxStalenessMs` | Integer, at least 2 times `pollIntervalMs`. Default 4 times `pollIntervalMs`. |
 | `contracts` | At least one. Names match `^[a-z0-9][a-z0-9-_]{0,63}$`. |
@@ -90,17 +92,18 @@ Returns the lowercase hex SHA-256 of the Wasm bytes, which is the hash Stellar a
 ### `createVersionGuard(config, options?)`
 
 ```ts
-function createVersionGuard(config: WasmwardConfig, options?: {
-  server?: GuardServer;   // defaults to new rpc.Server(config.network.rpcUrl)
-  now?: () => number;     // defaults to Date.now
+function createVersionGuard(config: WasmwardConfigInput, options?: {
+  server?: GuardServer;            // the primary; defaults to new rpc.Server(config.network.rpcUrl)
+  fallbackServers?: GuardServer[]; // defaults to one client per network.fallbackRpcUrls entry
+  now?: () => number;              // defaults to Date.now
 }): VersionGuard;
 ```
 
-The config is validated again, so a hand-built object cannot skip the schema rules. `GuardServer` is the part of `rpc.Server` the guard uses (`getNetwork()` and `getLedgerEntries(...keys)`); a real `rpc.Server` satisfies it.
+`WasmwardConfigInput` is `WasmwardConfig` with `network.fallbackRpcUrls` optional. The config is validated again, so a hand-built object cannot skip the schema rules. `GuardServer` is the part of `rpc.Server` the guard uses (`getNetwork()` and `getLedgerEntries(...keys)`); a real `rpc.Server` satisfies it.
 
 ### `guard.start()`
 
-Calls `getNetwork()`. If the passphrase differs from the config, throws `ConfigError` and does not poll. If the network cannot be reached, rejects with an `Error` whose `cause` is the original error. Otherwise runs one check and starts polling. Calling it again while running does nothing. A failed start can be retried.
+Calls `getNetwork()` on the primary. If its passphrase differs from the config, throws `ConfigError` and does not poll. If the primary cannot be reached, each fallback is tried in turn; if none can be reached, rejects with `Could not verify the network: ...` naming each endpoint by position. Otherwise runs one check and starts polling. Calling it again while running does nothing. A failed start can be retried.
 
 ### `guard.stop()`
 
@@ -174,7 +177,7 @@ Returns plain JSON, safe to serve from any framework:
 ```ts
 interface HealthReport {
   ok: boolean;                       // network verified and every contract supported
-  network: { passphrase: string; verified: boolean };
+  network: { passphrase: string; verified: boolean; usingFallback: boolean };
   contracts: Record<string, {
     contractId: string;
     status: Status;
@@ -190,7 +193,7 @@ interface HealthReport {
 }
 ```
 
-The RPC URL is deliberately not included, since it can contain an API key.
+`usingFallback` is true when the latest successful lookup came from a fallback endpoint, which is worth alerting on: you are running on your spare. The RPC URLs are deliberately not included, since they can contain API keys.
 
 ## Errors
 
@@ -237,6 +240,10 @@ type LiveExecutable =
 ### `initialState`, `nextState`, `effectiveStatus`, `isWritable`
 
 The pure status model. `nextState(prev, result, contractConfig, now, maxStalenessMs)` computes the next state; `effectiveStatus` and `isWritable` apply the call-time staleness rule. `describeBlock` produces the reason text used in `WriteBlockedError` (internal to the package, not exported from the main entry).
+
+### `createEndpointSet(servers, passphrase, timeoutMs)`
+
+The failover logic behind the guard and `wasmward check`. Takes the primary and fallbacks as `GuardServer`s and returns `{ verifyNetwork(), lookup(contractIds, timeoutMs), usingFallback }`. With one server it behaves exactly like that server alone.
 
 ### `createPoller`, `nextDelayMs`
 

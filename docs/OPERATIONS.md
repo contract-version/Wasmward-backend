@@ -24,6 +24,34 @@ Use the hash of the artifact that is actually deployed, not of a rebuild. The sa
 - `npx wasmward hash <file.wasm>` computes the same value Stellar assigns on upload.
 - If you need two machines to agree, make the build reproducible, or build once in CI and pass the artifact on.
 
+## Using more than one RPC endpoint
+
+By default one RPC outage blocks every write once `maxStalenessMs` has passed. If that matters to you, list spare endpoints:
+
+```json
+"network": {
+  "rpcUrl": "https://rpc-a.example.org",
+  "fallbackRpcUrls": ["https://rpc-b.example.org"],
+  "passphrase": "Public Global Stellar Network ; September 2015"
+}
+```
+
+How it behaves:
+
+- **Failover happens only when an endpoint cannot answer at all** (network error, timeout, an RPC error) for every contract in a lookup. An answer such as `missing` or `archived` is an answer, not a failure, and does not make the guard ask someone else.
+- **Every endpoint must prove it serves your network before it is trusted.** A fallback is asked for its network passphrase before its first lookup. One that reports a different network is rejected for good, so a mis-typed fallback can never make a contract look `supported`.
+- **A primary on the wrong network is a configuration error** and stops `start()`; fallbacks are not consulted to override it.
+- **It stays on a working fallback** instead of waiting for the failing primary every poll, and tries the primary first again every sixth lookup, so it returns to the primary by itself once it has recovered.
+- **`health().network.usingFallback` tells you** when you are running on a spare. Alert on it: it means the primary is failing.
+- **`wasmward check` and `wasmward watch` use the same fallbacks.**
+
+Things to weigh:
+
+- **Pick independent providers.** Two endpoints from one provider share an outage.
+- **Every endpoint you list is trusted equally.** Wasmward does not compare endpoints with each other, so an RPC that lies can still make an unsupported contract look supported. Only list endpoints you would trust alone.
+- **A fully failing lookup takes longer.** Each endpoint gets the usual timeout (the smaller of the poll interval and 10 seconds), one after another. Keep to one or two fallbacks. Freshness is dated from when a lookup started, so a slow failover never makes data look fresher than it is.
+- **Errors name endpoints by position** (`endpoint 0`, `endpoint 1`), not by URL, because RPC URLs often contain API keys. The text of the underlying error is passed through as the client gives it.
+
 ## Upgrading a contract safely
 
 The order matters. A contract that is upgraded before your apps know the new hash will have its writes blocked until they do.

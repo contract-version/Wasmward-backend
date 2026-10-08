@@ -269,3 +269,14 @@
 - Ran in the built-in browser against live testnet: `pending -> supported` with the v1 hash and label, deposit worked, switching to the older build gave `unsupported`, a disabled button and the exact blocked message, and no console errors.
 - Phone-width check found a hash overflowing its container; fixed with `overflow-wrap`.
 - Frontend CI (clean checkout of both repositories, install, build, bundle check) passes.
+
+## Extra: fallback RPC endpoints
+
+**Date:** 2026-10-08
+
+**Built**
+- `network.fallbackRpcUrls` in the config; `src/endpoints.ts` with `createEndpointSet`; the guard, `wasmward check` and `wasmward watch` fail over to spare endpoints, each verified against the configured network first; `health().network.usingFallback`. A seed-backlog item built on request (D-018).
+
+**Results**
+- `pnpm test:coverage`: 429 tests pass (60 new), 99.65% lines; typecheck, lint and build clean.
+- Live testnet: `check` with a dead primary and real testnet fallback exits 0 (`usingFallback: true`); both dead exits 2; the integration suite still passes.
