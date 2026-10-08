@@ -158,7 +158,10 @@ vault  supported (v1)  a7a8...  (expires in about 6 days; extend its lifetime so
 ```
 
 - The note says "extend its lifetime soon" when under about 7 days remain. That figure is a convention, not a network rule, and ledger time is only about 5 seconds a ledger, so treat the days as rough.
-- It is informational. It never changes a status or an exit code, so a pipeline will not fail because of it. If you want it to, read `contracts.<name>.ledgersUntilExpiry` from `check --json` (or from `guard.health()`) and compare it with your own threshold.
+- By default it is informational: it never changes a status or an exit code, so a pipeline will not fail because of it.
+- **To make it a gate, ask for a minimum:** `wasmward check --min-ttl-days 3`. A supported contract with fewer than 3 days left then fails the check with exit code 1, and its line says so (`expires in about 2 days: under the 3-day minimum`). The days may be fractional (`0.5`). With `--json`, the contract gets `belowMinTtl: true`, the report gets `minTtlDays`, and `ok` agrees with the exit code. A contract that already fails for another reason is not flagged twice, and a lookup that could not be completed is still exit 2. The flag only applies to `check`, and a multi-network check applies it to every network.
+- To use the figure some other way, read `contracts.<name>.ledgersUntilExpiry` from `check --json` (or from `guard.health()`) and compare it with your own threshold.
+- **Run it on a schedule.** A contract can expire between releases, so a pipeline that only runs on deploy will not notice. The test contract's repository does this weekly with Wasmward itself; see its `.github/workflows/fixture-health.yml`.
 - Extending a contract is done with the Stellar CLI (`stellar contract extend`) or from your own tooling. The test contract in [Wasmward-contract](https://github.com/contract-version/Wasmward-contract) has `scripts/extend.sh` for exactly this.
 - The figure is for the instance only. The contract's Wasm code is a separate ledger entry with its own lifetime that Wasmward does not look at ([threat model](THREAT-MODEL.md)), so extend both.
 

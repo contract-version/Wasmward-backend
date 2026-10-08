@@ -74,6 +74,7 @@ npx wasmward init vault C... --preset testnet --wasm build/contract.wasm   # cre
 npx wasmward hash build/contract.wasm                    # print a Wasm file's SHA-256
 npx wasmward add vault build/contract.wasm --label v2    # add it to wasmward.json
 npx wasmward check                                       # exit 0 only if every contract is supported
+npx wasmward check --min-ttl-days 3                      # ...and none expires within 3 days
 npx wasmward watch                                       # print each status change until Ctrl+C
 ```
 

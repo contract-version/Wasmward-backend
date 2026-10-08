@@ -383,3 +383,16 @@
 **Results**
 - `pnpm test:coverage`: all tests pass (21 new); typecheck, lint and build clean.
 - Live testnet: it reported the fixture as expiring in about 6 days. The fixture was extended and `check` then showed about 29 days.
+
+## Extra: expiry gate, fixture health workflow, demo (all three repositories)
+
+**Date:** 2026-10-08
+
+**Backend** (D-028): `wasmward check --min-ttl-days <n>`.
+**Contract:** `fixture.wasmward.json`, `.github/workflows/fixture-health.yml` (weekly, uses Wasmward on the fixture) and `.github/workflows/ci.yml` (fmt, clippy, tests and Wasm builds for v1 and v2).
+**Frontend:** the demo shows the time left.
+
+**Results**
+- Backend: all tests pass (20 new); typecheck, lint and build clean.
+- Contract: fmt and clippy clean for both variants; both Wasm builds work and differ.
+- Frontend: verified in a real browser, including the warning state.
