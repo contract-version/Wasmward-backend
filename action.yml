@@ -1,0 +1,70 @@
+name: Wasmward check
+description: >-
+  Fail a workflow when a Soroban contract runs code your app does not support, cannot be checked, or is
+  about to expire. Runs `wasmward check`.
+author: Wasmward contributors
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  config:
+    description: Path to the Wasmward config file, relative to the workspace.
+    required: false
+    default: wasmward.json
+  network:
+    description: >-
+      For a config with a `networks` section, the one network to check. Leave empty to check every network.
+    required: false
+    default: ''
+  min-ttl-days:
+    description: >-
+      Also fail if a supported contract has fewer than this many days left before it expires, for example 3.
+      Leave empty to only report the time left.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    # Wasmward is not on npm yet, so it is built from the repository this action lives in.
+    - name: Build Wasmward
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        corepack enable
+        pnpm install --frozen-lockfile
+        pnpm build
+
+    - name: Check the contracts
+      shell: bash
+      # Inputs go through the environment, never into the script text, so a value cannot become a command.
+      env:
+        WASMWARD_CONFIG: ${{ inputs.config }}
+        WASMWARD_NETWORK: ${{ inputs.network }}
+        WASMWARD_MIN_TTL_DAYS: ${{ inputs.min-ttl-days }}
+      run: |
+        args=(check --config "$WASMWARD_CONFIG")
+        if [ -n "$WASMWARD_NETWORK" ]; then args+=(--network "$WASMWARD_NETWORK"); fi
+        if [ -n "$WASMWARD_MIN_TTL_DAYS" ]; then args+=(--min-ttl-days "$WASMWARD_MIN_TTL_DAYS"); fi
+
+        output="$RUNNER_TEMP/wasmward-check.txt"
+        set +e
+        node "$GITHUB_ACTION_PATH/dist/cli.js" "${args[@]}" 2>&1 | tee "$output"
+        code="${PIPESTATUS[0]}"
+        set -e
+
+        {
+          echo '### Wasmward check'
+          echo
+          echo '```text'
+          cat "$output"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        # 0: all supported. 1: something unsupported or too close to expiring. 2: could not be checked.
+        exit "$code"
