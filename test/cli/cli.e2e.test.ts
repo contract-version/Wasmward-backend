@@ -149,6 +149,39 @@ describe('the built CLI', { timeout: 90_000 }, () => {
     }
   });
 
+  it('check succeeds through a fallback endpoint when the primary is unreachable', async () => {
+    // Nothing listens on port 1, so the primary fails at once; the fallback is the fake RPC server.
+    await writeFile(
+      join(dir, 'fallback.json'),
+      JSON.stringify({
+        version: 1,
+        network: { rpcUrl: 'http://127.0.0.1:1', fallbackRpcUrls: [rpc.url], passphrase: PASSPHRASE },
+        contracts: { vault: { contractId: VAULT, supported: [{ wasmHash: V1, label: 'v1.0.0' }] } },
+      }),
+    );
+    const result = await runCli(['check', '--json', '--config', 'fallback.json'], dir);
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: true,
+      network: { verified: true, usingFallback: true },
+      contracts: { vault: { status: 'supported', liveWasmHash: V1 } },
+    });
+  });
+
+  it('check exits 2 when the primary and the fallback are both unreachable', async () => {
+    await writeFile(
+      join(dir, 'all-down.json'),
+      JSON.stringify({
+        version: 1,
+        network: { rpcUrl: 'http://127.0.0.1:1', fallbackRpcUrls: ['http://127.0.0.1:2'], passphrase: PASSPHRASE },
+        contracts: { vault: { contractId: VAULT, supported: [{ wasmHash: V1 }] } },
+      }),
+    );
+    const result = await runCli(['check', '--config', 'all-down.json'], dir);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('all 2 RPC endpoints failed');
+  });
+
   it('add updates the default config file and refuses a duplicate', async () => {
     await writeFile(join(dir, 'c.wasm'), new Uint8Array([7, 7, 7]));
     const first = await runCli(['add', 'vault', 'c.wasm', '--label', 'v3'], dir);

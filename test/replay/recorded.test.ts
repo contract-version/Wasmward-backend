@@ -5,7 +5,7 @@ import { rpc } from '@stellar/stellar-sdk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { fetchExecutables } from '../../src/fetch.js';
 import { createVersionGuard } from '../../src/guard.js';
-import type { WasmwardConfig } from '../../src/types.js';
+import type { WasmwardConfigInput } from '../../src/types.js';
 
 /**
  * Replays responses recorded from Stellar testnet (test/fixtures/recorded/testnet-v1.json): the
@@ -57,7 +57,7 @@ afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
-function configFor(hashes: string[]): WasmwardConfig {
+function configFor(hashes: string[]): WasmwardConfigInput {
   return {
     version: 1,
     network: { rpcUrl: url, passphrase: recording.getNetwork.result.passphrase },

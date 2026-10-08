@@ -6,7 +6,7 @@ import { fetchExecutables } from '../../src/fetch.js';
 import { createVersionGuard, type VersionGuard } from '../../src/guard.js';
 import { hashWasm } from '../../src/hash.js';
 import { WriteBlockedError } from '../../src/errors.js';
-import type { WasmwardConfig } from '../../src/types.js';
+import type { WasmwardConfigInput } from '../../src/types.js';
 import { loadFixtureEnvironment, upgradeContract, type FixtureEnvironment } from './fixture.js';
 
 /**
@@ -24,7 +24,7 @@ if ('reason' in loaded) {
   console.warn(`[integration] skipped: ${loaded.reason}`);
 }
 
-function configFor(env: FixtureEnvironment, contractId: string, hashes: string[]): WasmwardConfig {
+function configFor(env: FixtureEnvironment, contractId: string, hashes: string[]): WasmwardConfigInput {
   return {
     version: 1,
     network: { rpcUrl: env.fixture.rpcUrl, passphrase: env.fixture.passphrase },
@@ -53,7 +53,7 @@ describe.runIf('env' in loaded)('testnet upgrade flow', () => {
     return result?.kind === 'wasm' ? result.wasmHash : undefined;
   }
 
-  async function makeGuard(config: WasmwardConfig): Promise<VersionGuard> {
+  async function makeGuard(config: WasmwardConfigInput): Promise<VersionGuard> {
     const guard = createVersionGuard(config);
     guards.push(guard);
     await guard.start();

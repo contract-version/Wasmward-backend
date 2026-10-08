@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfigError, WriteBlockedError } from '../../src/errors.js';
 import { createVersionGuard, type StatusChange, type VersionGuard } from '../../src/guard.js';
-import type { WasmwardConfig } from '../../src/types.js';
+import type { WasmwardConfigInput } from '../../src/types.js';
 import { FakeChain, PASSPHRASE } from '../fixtures/chain.js';
 import { contractIdOf, hashOf } from '../fixtures/ledger.js';
 
@@ -15,7 +15,7 @@ const POOL = contractIdOf(2);
 const V1 = hashOf(1);
 const V2 = hashOf(2);
 
-function configWith(vaultHashes: string[] = [V1], overrides: Partial<WasmwardConfig> = {}): WasmwardConfig {
+function configWith(vaultHashes: string[] = [V1], overrides: Partial<WasmwardConfigInput> = {}): WasmwardConfigInput {
   return {
     version: 1,
     network: { rpcUrl: 'https://rpc.example.org', passphrase: PASSPHRASE },
@@ -31,13 +31,13 @@ function configWith(vaultHashes: string[] = [V1], overrides: Partial<WasmwardCon
 let chain: FakeChain;
 const guards: VersionGuard[] = [];
 
-function make(config: WasmwardConfig = configWith()): VersionGuard {
+function make(config: WasmwardConfigInput = configWith()): VersionGuard {
   const guard = createVersionGuard(config, { server: chain });
   guards.push(guard);
   return guard;
 }
 
-async function started(config?: WasmwardConfig): Promise<VersionGuard> {
+async function started(config?: WasmwardConfigInput): Promise<VersionGuard> {
   const guard = make(config);
   await guard.start();
   return guard;
@@ -138,7 +138,7 @@ describe('start', () => {
   });
 
   it('rejects an invalid config object', () => {
-    const bad = { ...configWith(), version: 2 } as unknown as WasmwardConfig;
+    const bad = { ...configWith(), version: 2 } as unknown as WasmwardConfigInput;
     expect(() => createVersionGuard(bad, { server: chain })).toThrow(ConfigError);
   });
 
@@ -588,7 +588,7 @@ describe('status and health', () => {
     const report = guard.health();
     expect(report).toEqual({
       ok: true,
-      network: { passphrase: PASSPHRASE, verified: true },
+      network: { passphrase: PASSPHRASE, verified: true, usingFallback: false },
       contracts: {
         vault: {
           contractId: VAULT,

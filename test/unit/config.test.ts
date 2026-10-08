@@ -72,7 +72,11 @@ describe('loadConfig: valid input', () => {
   it('accepts the documented shape and applies defaults', () => {
     expect(loadConfig(validConfig())).toEqual({
       version: 1,
-      network: { rpcUrl: 'https://soroban-testnet.stellar.org', passphrase: 'Test SDF Network ; September 2015' },
+      network: {
+        rpcUrl: 'https://soroban-testnet.stellar.org',
+        fallbackRpcUrls: [],
+        passphrase: 'Test SDF Network ; September 2015',
+      },
       pollIntervalMs: 30_000,
       maxStalenessMs: 120_000,
       contracts: { vault: { contractId: CONTRACT_A, supported: [{ wasmHash: HASH_1, label: 'v1.0.0' }] } },
