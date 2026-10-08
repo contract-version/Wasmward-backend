@@ -245,3 +245,15 @@
 **Results**
 - `test/unit/cli-watch.test.ts`: 12 tests covering transitions, quiet polls, JSON lines, a failing first lookup and its recovery, a missing contract, network mismatch and unreachable RPC, a missing config, an already-aborted signal, extra arguments, a missing signal, and a clean stop with no timers left.
 - Run against the live testnet fixture: printed `pending -> supported` with the v1 hash and label, and exited 0 when stopped by SIGTERM.
+
+## Extra: pairing guide
+
+**Date:** 2026-10-08
+
+**Built**
+- `docs/PAIRING.md`: a six-step release workflow combining soroban-upgrade-safeguard and Wasmward, a GitHub Actions sketch, and a list of things to know. Linked from the README, `docs/OPERATIONS.md` and the changelog. A seed-backlog item built on request (D-016).
+
+**Results**
+- The Wasmward steps (`hash`, `check --json`, `add`, `check`) were run for real against the testnet fixture: candidate hash `ec040ead...`, live hash `a7a82511...`, config updated atomically, `check` exit 0 with both builds supported.
+- Writing the guide caught a real bug in its own first draft: reading the live hash through a pipe fails under `bash -e -o pipefail` when `check` exits 1. Fixed and re-tested.
+- The upstream safeguard repository did not compile on the default branch (D-016), so its commands are documented from its README and labelled as such.
