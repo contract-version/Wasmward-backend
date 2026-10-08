@@ -30,7 +30,7 @@ npx wasmward init vault C... --preset testnet
 
 Things to weigh:
 
-- **One lookup per poll, per process.** All of an app's contracts are checked in a single RPC call (up to 200 contracts). If you run 20 backend instances, that is 20 calls per interval. Check your RPC provider's rate limits.
+- **Two requests per poll, per process.** All of an app's contracts are checked in one RPC call (up to 200 contracts), followed by one more for the Wasm code entries of the builds in use (one key per distinct hash, so fewer than the contracts if some share a build). If you run 20 backend instances, that is 40 calls per interval. Check your RPC provider's rate limits.
 - **Staleness is a trade between safety and availability.** If the RPC is down for longer than `maxStalenessMs`, every write is blocked, including to contracts that did not change. That is deliberate: the guard cannot tell the difference. A longer limit tolerates longer outages but lets a stale answer stand for longer.
 - **Backoff.** When every lookup in a poll fails, the wait doubles each time, up to half of `maxStalenessMs`, so recovery is noticed promptly.
 - **Use a dedicated RPC URL you trust.** The guard believes what the RPC says. Do not put an RPC URL that contains an API key in client-side code.
@@ -150,7 +150,7 @@ Be clear about what a guard can and cannot do.
 
 ## Contracts expire
 
-A contract instance has a lifetime, and if nobody extends it, it expires and its writes stop working until it is restored. `wasmward check` shows how long each supported contract has left, using what the RPC reported at the last check:
+A contract runs from two ledger entries: its **instance** and its **Wasm code**. Each has its own lifetime, and if nobody extends one, it expires and calls stop working until it is restored. Both must be live, so Wasmward looks at both and treats the contract as `archived` (writes blocked) as soon as either has ended. `wasmward check` shows how long each supported contract has left, the smaller of the two, using what the RPC reported at the last check:
 
 ```text
 vault  supported (v1)  a7a8...  (expires in about 29 days)
@@ -160,6 +160,14 @@ vault  supported (v1)  a7a8...  (expires in about 6 days; extend its lifetime so
 - The note says "extend its lifetime soon" when under about 7 days remain. That figure is a convention, not a network rule, and ledger time is only about 5 seconds a ledger, so treat the days as rough.
 - By default it is informational: it never changes a status or an exit code, so a pipeline will not fail because of it.
 - **To make it a gate, ask for a minimum:** `wasmward check --min-ttl-days 3`. A supported contract with fewer than 3 days left then fails the check with exit code 1, and its line says so (`expires in about 2 days: under the 3-day minimum`). The days may be fractional (`0.5`). With `--json`, the contract gets `belowMinTtl: true`, the report gets `minTtlDays`, and `ok` agrees with the exit code. A contract that already fails for another reason is not flagged twice, and a lookup that could not be completed is still exit 2. The flag only applies to `check`, and a multi-network check applies it to every network.
+- **They are extended separately.** When the note says "Wasm code expires in ...", extend the code, not the instance (`ledgers` is how far to extend):
+
+  ```bash
+  stellar contract extend --id <contract id> --durability persistent --ledgers-to-extend <ledgers> --source-account <you> --network <network>
+  stellar contract extend --wasm-hash <live wasm hash> --ledgers-to-extend <ledgers> --source-account <you> --network <network>
+  ```
+
+  Contracts built from the same Wasm share one code entry, so extending it once covers all of them. `check --json` and `guard.health()` say which one is closer to the end (`expiringEntry`: `instance` or `code`).
 - To use the figure some other way, read `contracts.<name>.ledgersUntilExpiry` from `check --json` (or from `guard.health()`) and compare it with your own threshold.
 - **Run it on a schedule.** A contract can expire between releases, so a pipeline that only runs on deploy will not notice. In GitHub Actions use the Wasmward action (see the README) with `min-ttl-days` on a `schedule:` trigger. The test contract's repository does this weekly; see its `.github/workflows/fixture-health.yml`, which is the whole job:
 

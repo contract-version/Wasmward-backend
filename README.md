@@ -100,7 +100,7 @@ The repository is also a GitHub Action that runs `wasmward check` and fails the 
 |---|---|---|
 | `config` | `wasmward.json` | Path to the config, relative to the workspace. |
 | `network` | empty | For a config with a `networks` section, the one network to check. Empty checks every network. |
-| `min-ttl-days` | empty | Fail if a supported contract has fewer days left than this. Empty only reports the time left. |
+| `min-ttl-days` | empty | Fail if a supported contract has fewer days left than this, counting whichever of its instance and Wasm code ends first. Empty only reports the time left. |
 
 The step's result is the command's exit code (0 all supported, 1 something unsupported or too close to expiring, 2 could not be checked) and the output is also written to the job summary. Until Wasmward is on npm the action builds it from this repository, which takes about a minute, so use a commit or tag in place of `@main` once you want a version that cannot change under you. It is how the [test contract](https://github.com/contract-version/Wasmward-contract) checks itself every week, and how the [browser example](https://github.com/contract-version/Wasmward-frontend) checks the contract it depends on.
 

@@ -289,7 +289,8 @@ interface HealthReport {
     status: Status;
     writable: boolean;
     liveWasmHash?: string;
-    ledgersUntilExpiry?: number;      // ledgers the instance had left at the last check (about 5 s each)
+    ledgersUntilExpiry?: number;      // ledgers the contract had left at the last check: the sooner of instance and Wasm code (about 5 s each)
+    expiringEntry?: 'instance' | 'code'; // which of the two that figure counts down to, so you know what to extend
     matchedLabel?: string;
     lastCheckedAt?: number;
     lastSuccessAt?: number;
@@ -333,7 +334,7 @@ These are exported for tools and tests. Most apps only need the guard.
 
 ### `fetchExecutables(server, contractIds, timeoutMs)`
 
-Looks up what code each contract instance is running with as few `getLedgerEntries` calls as possible (at most 200 keys each, `MAX_KEYS_PER_REQUEST`). Returns a map with an entry for every requested contract, never throws:
+Looks up what code each contract instance is running with as few `getLedgerEntries` calls as possible (at most 200 keys each, `MAX_KEYS_PER_REQUEST`), then makes the same kind of call for the ledger entries that hold those Wasm builds (one key per distinct hash), to learn when each expires. Returns a map with an entry for every requested contract, never throws:
 
 ```ts
 type LiveExecutable =
@@ -348,14 +349,15 @@ type LiveExecutable =
 
 The pure status model. `nextState(prev, result, contractConfig, now, maxStalenessMs)` computes the next state; `effectiveStatus` and `isWritable` apply the call-time staleness rule. `describeBlock` produces the reason text used in `WriteBlockedError` (internal to the package, not exported from the main entry).
 
-### `ledgersUntilExpiry(state)`, `describeTimeLeft(ledgers)`, `EXPIRY_WARNING_LEDGERS`, `SECONDS_PER_LEDGER`
+### `ledgersUntilExpiry(state)`, `expiringEntry(state)`, `describeTimeLeft(ledgers)`, `EXPIRY_WARNING_LEDGERS`, `SECONDS_PER_LEDGER`
 
 ```ts
 function ledgersUntilExpiry(state: ContractState): number | undefined;
+function expiringEntry(state: ContractState): 'instance' | 'code' | undefined;
 function describeTimeLeft(ledgers: number): string; // "about 6 days", "about 5 hours", "less than an hour"
 ```
 
-A contract instance has a lifetime and expires if nobody extends it. The state records when, from the last lookup that found an instance, so you can see it coming: `ledgersUntilExpiry` is how many ledgers it had left at that lookup (never below zero, `undefined` when unknown), and `describeTimeLeft` turns a number of ledgers into rough words, at about 5 seconds a ledger. `EXPIRY_WARNING_LEDGERS` (120,960, about 7 days) is the point below which `wasmward check` suggests extending. This is a snapshot taken at the last check, not a countdown, and it is informational: it never changes a status or whether writes are allowed.
+A contract needs two ledger entries to run, its instance and its Wasm code, and each has its own lifetime that ends if nobody extends it. The state records both (`liveUntilLedger`, `codeLiveUntilLedger`, from the last lookup that found Wasm) so you can see it coming: `ledgersUntilExpiry` is how many ledgers the sooner of them had left at that lookup (never below zero, `undefined` when unknown), `expiringEntry` says which one that is (`instance` when they end together), and `describeTimeLeft` turns a number of ledgers into rough words, at about 5 seconds a ledger. `EXPIRY_WARNING_LEDGERS` (120,960, about 7 days) is the point below which `wasmward check` suggests extending. This is a snapshot taken at the last check, not a countdown, and it is informational: it never changes a status or whether writes are allowed.
 
 ### `createRpcClient(url, timeoutMs)`
 
