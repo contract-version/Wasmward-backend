@@ -233,6 +233,54 @@ describe('the built CLI', { timeout: 90_000 }, () => {
     });
   });
 
+  it('init creates a config from the live code, check then passes on it, and init will not overwrite it', async () => {
+    const fresh = await mkdtemp(join(tmpdir(), 'wasmward-init-e2e-'));
+    try {
+      const created = await runCli(
+        ['init', 'vault', VAULT, '--rpc-url', rpc.url, '--passphrase', PASSPHRASE, '--label', 'first'],
+        fresh,
+      );
+      expect(created.code).toBe(0);
+      expect(created.stdout).toContain(`'vault' supports first (${V1})`);
+      expect(created.stderr).toContain('trusts the RPC');
+
+      const saved = JSON.parse(await readFile(join(fresh, 'wasmward.json'), 'utf8'));
+      expect(saved.contracts.vault.supported).toEqual([{ wasmHash: V1, label: 'first' }]);
+
+      const checked = await runCli(['check'], fresh);
+      expect(checked.code).toBe(0);
+      expect(checked.stdout).toContain('vault  supported (first)');
+
+      const again = await runCli(
+        ['init', 'vault', VAULT, '--rpc-url', rpc.url, '--passphrase', PASSPHRASE],
+        fresh,
+      );
+      expect(again.code).toBe(2);
+      expect(again.stderr).toContain('already exists');
+    } finally {
+      await rm(fresh, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
+  it('init --wasm needs no network at all', async () => {
+    const fresh = await mkdtemp(join(tmpdir(), 'wasmward-init-offline-'));
+    try {
+      await writeFile(join(fresh, 'b.wasm'), WASM_B);
+      // Nothing listens on port 1: a network call would fail, so success proves there was none.
+      const result = await runCli(
+        ['init', 'vault', VAULT, '--rpc-url', 'http://127.0.0.1:1', '--passphrase', PASSPHRASE, '--wasm', 'b.wasm', '--json'],
+        fresh,
+      );
+      expect(result.code).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        source: 'wasm-file',
+        wasmHash: createHash('sha256').update(WASM_B).digest('hex'),
+      });
+    } finally {
+      await rm(fresh, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+
   it('add updates the default config file and refuses a duplicate', async () => {
     await writeFile(join(dir, 'c.wasm'), new Uint8Array([7, 7, 7]));
     const first = await runCli(['add', 'vault', 'c.wasm', '--label', 'v3'], dir);
