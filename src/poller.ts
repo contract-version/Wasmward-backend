@@ -1,6 +1,12 @@
 /** Jitter added to every wait, as a fraction of the wait. The wait grows by 0 to this much. */
 export const JITTER_FRACTION = 0.1;
 
+/**
+ * `setTimeout` cannot wait longer than this (about 24.8 days). A longer delay does not wait: the runtime
+ * fires it after a millisecond, which would turn a timer into a tight loop.
+ */
+export const MAX_TIMER_MS = 2 ** 31 - 1;
+
 /** The backoff exponent stops growing here; the cap on the wait applies long before this matters. */
 const MAX_BACKOFF_EXPONENT = 30;
 
@@ -8,7 +14,8 @@ const MAX_BACKOFF_EXPONENT = 30;
  * How long to wait before the next tick.
  * The base wait is `intervalMs` doubled once per consecutive failing tick, capped at half of
  * `maxStalenessMs` so staleness is still noticed on time. Jitter of up to 10 percent is added on top
- * of the capped base, so the real wait is at most 1.1 times the cap. `random` returns a number in [0, 1).
+ * of the capped base, so the real wait is at most 1.1 times the cap, and never more than {@link MAX_TIMER_MS}.
+ * `random` returns a number in [0, 1).
  */
 export function nextDelayMs(
   failingTicks: number,
@@ -18,7 +25,7 @@ export function nextDelayMs(
 ): number {
   const cap = maxStalenessMs / 2;
   const base = Math.min(intervalMs * 2 ** Math.min(failingTicks, MAX_BACKOFF_EXPONENT), cap);
-  return base * (1 + JITTER_FRACTION * random());
+  return Math.min(base * (1 + JITTER_FRACTION * random()), MAX_TIMER_MS);
 }
 
 export interface PollerOptions {

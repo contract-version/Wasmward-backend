@@ -1,4 +1,4 @@
-export { loadConfig, loadConfigDocument, DEFAULT_POLL_INTERVAL_MS, MIN_POLL_INTERVAL_MS, MAX_FALLBACK_RPC_URLS } from './config.js';
+export { loadConfig, loadConfigDocument, DEFAULT_POLL_INTERVAL_MS, MIN_POLL_INTERVAL_MS, MAX_POLL_INTERVAL_MS, MAX_FALLBACK_RPC_URLS } from './config.js';
 export type { ConfigDocument } from './config.js';
 export { ConfigError, WriteBlockedError } from './errors.js';
 export type { ConfigIssue } from './errors.js';
@@ -10,7 +10,7 @@ export { createVersionGuard } from './guard.js';
 export type { GuardServer, StatusChange, StatusListener, VersionGuard, VersionGuardOptions } from './guard.js';
 export { hashWasm } from './hash.js';
 export type { ContractHealth, HealthReport } from './health.js';
-export { createPoller, nextDelayMs } from './poller.js';
+export { createPoller, nextDelayMs, MAX_TIMER_MS } from './poller.js';
 export type { Poller, PollerOptions } from './poller.js';
 export { effectiveStatus, initialState, isWritable, nextState } from './state.js';
 export type {

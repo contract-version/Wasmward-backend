@@ -5,6 +5,8 @@ import type { ContractConfig, WasmwardConfig } from './types.js';
 
 export const DEFAULT_POLL_INTERVAL_MS = 30_000;
 export const MIN_POLL_INTERVAL_MS = 5_000;
+/** One day. Anything longer is not polling, and the timers behind it cannot wait that long reliably. */
+export const MAX_POLL_INTERVAL_MS = 86_400_000;
 /** `maxStalenessMs` defaults to this many poll intervals. */
 const DEFAULT_STALENESS_FACTOR = 4;
 /** `maxStalenessMs` may not be smaller than this many poll intervals. */
@@ -99,7 +101,11 @@ const configSchema = z
   .strictObject({
     version: z.literal(1, 'must equal 1'),
     network: networkSchema,
-    pollIntervalMs: z.int().min(MIN_POLL_INTERVAL_MS, `must be at least ${MIN_POLL_INTERVAL_MS}`).optional(),
+    pollIntervalMs: z
+      .int()
+      .min(MIN_POLL_INTERVAL_MS, `must be at least ${MIN_POLL_INTERVAL_MS}`)
+      .max(MAX_POLL_INTERVAL_MS, `must be at most ${MAX_POLL_INTERVAL_MS} (one day)`)
+      .optional(),
     maxStalenessMs: z.int().positive('must be a positive integer').optional(),
     contracts: z
       .record(z.string().regex(CONTRACT_NAME), contractSchema)
