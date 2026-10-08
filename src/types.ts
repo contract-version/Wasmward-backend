@@ -22,11 +22,14 @@ export interface NetworkConfig {
 }
 
 /**
- * A config as you may write it in code: the same as {@link WasmwardConfig}, except that
- * `network.fallbackRpcUrls` may be left out. `createVersionGuard` accepts this and validates it again.
+ * A config as you may write it in code: the same as {@link WasmwardConfig}, except that anything with a
+ * default may be left out (`network.fallbackRpcUrls`, `pollIntervalMs`, `maxStalenessMs`).
+ * `createVersionGuard` accepts this and validates it again.
  */
-export type WasmwardConfigInput = Omit<WasmwardConfig, 'network'> & {
+export type WasmwardConfigInput = Omit<WasmwardConfig, 'network' | 'pollIntervalMs' | 'maxStalenessMs'> & {
   network: Omit<NetworkConfig, 'fallbackRpcUrls'> & { fallbackRpcUrls?: string[] };
+  pollIntervalMs?: number;
+  maxStalenessMs?: number;
 };
 
 /** A validated config with every default applied. */
