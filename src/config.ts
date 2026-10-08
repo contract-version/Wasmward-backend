@@ -26,6 +26,15 @@ function normalizeUrl(value: string): string {
   }
 }
 
+/** True for a plain http URL however its scheme is spelled, as the URL parser sees it. */
+export function usesPlainHttp(value: string): boolean {
+  try {
+    return new URL(value).protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 function isAllowedRpcUrl(value: string): boolean {
   let url: URL;
   try {

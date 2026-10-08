@@ -88,7 +88,8 @@ function messageOf(error: unknown): string {
 
 async function rpcServerFor(url: string): Promise<GuardServer> {
   const { rpc } = await import('@stellar/stellar-sdk');
-  return new rpc.Server(url, { allowHttp: url.startsWith('http://') });
+  const { usesPlainHttp } = await loadConfigModule();
+  return new rpc.Server(url, { allowHttp: usesPlainHttp(url) });
 }
 
 async function defaultServer(config: WasmwardConfig): Promise<GuardServer> {
