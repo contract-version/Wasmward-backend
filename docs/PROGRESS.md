@@ -352,3 +352,14 @@
 **Fixed** (D-024, in `Wasmward-frontend`): rapid changes of the build selector no longer leave extra guards polling in the background. Reproduced and verified in a real browser by counting RPC requests (9 in 30 s before, 3 after).
 
 **Open items:** none in the code. What remains is yours: claim the `@wasmward` npm scope, add the `NPM_TOKEN` secret, set the changelog date, push the `v0.1.0` tag, and decide whether to open the seed-backlog issues.
+
+## Extra: consumer test of the packed package
+
+**Date:** 2026-10-08
+
+**Built:** `test/unit/consumer.test.ts` (D-025). The real tarball is installed into a throwaway project and used through `import`, `require`, strict TypeScript under Node's module resolution (ES module and CommonJS sources, with checks that the types are not `any`), and the CLI.
+
+**Results**
+- Everything passed: the CommonJS build and both sets of type declarations work as published. No package bug was found.
+- A deliberately broken CommonJS entry made the `require` case fail, so the test can catch that class of mistake.
+- `pnpm test:coverage`: all tests pass (5 new), lint, typecheck and build clean.
