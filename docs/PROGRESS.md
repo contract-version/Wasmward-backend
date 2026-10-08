@@ -315,3 +315,20 @@
 **Results**
 - `pnpm test:coverage`: 554 tests pass (40 new), 99.6% lines; typecheck, lint and build clean.
 - Live testnet: `init` from the chain and `init --wasm` on the local build gave the identical hash; `check` passed on the result; re-running `init` refused.
+
+## Extra: review round
+
+**Date:** 2026-10-08
+
+**Fixed** (D-022)
+- The stale timer re-arming itself in a tight loop after an announcement.
+- A retried `start()` succeeding through a fallback when the primary is on the wrong network.
+- An uppercase `HTTP://` scheme passing validation and then crashing the RPC client.
+- `WasmwardConfigInput` requiring settings that have defaults.
+
+**Results**
+- `pnpm test:coverage`: 566 tests pass (12 new regression tests, each shown to fail without its fix), 99.6% lines; typecheck and lint clean.
+
+**Open**
+- A hung RPC leaves its socket open, because the SDK's `timeout` option is unused in 17.2.1. Not a correctness problem; to be fixed and tested before 0.1.0 is published (D-022).
+- The browser example's build selector is not serialised against rapid changes.
