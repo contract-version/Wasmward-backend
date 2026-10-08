@@ -221,6 +221,8 @@ interface ContractState {
   contractId: string;
   status: Status;
   liveWasmHash?: string;     // last Wasm hash seen
+  liveUntilLedger?: number;  // ledger after which the instance expires, at the last lookup that found one
+  latestLedger?: number;     // the latest ledger the RPC reported on that lookup
   matchedLabel?: string;     // label of the supported version it matched
   lastCheckedAt?: number;    // ms since epoch, last lookup of any outcome
   lastSuccessAt?: number;    // ms since epoch, last lookup that did not error
@@ -287,6 +289,7 @@ interface HealthReport {
     status: Status;
     writable: boolean;
     liveWasmHash?: string;
+    ledgersUntilExpiry?: number;      // ledgers the instance had left at the last check (about 5 s each)
     matchedLabel?: string;
     lastCheckedAt?: number;
     lastSuccessAt?: number;
@@ -344,6 +347,15 @@ type LiveExecutable =
 ### `initialState`, `nextState`, `effectiveStatus`, `isWritable`
 
 The pure status model. `nextState(prev, result, contractConfig, now, maxStalenessMs)` computes the next state; `effectiveStatus` and `isWritable` apply the call-time staleness rule. `describeBlock` produces the reason text used in `WriteBlockedError` (internal to the package, not exported from the main entry).
+
+### `ledgersUntilExpiry(state)`, `describeTimeLeft(ledgers)`, `EXPIRY_WARNING_LEDGERS`, `SECONDS_PER_LEDGER`
+
+```ts
+function ledgersUntilExpiry(state: ContractState): number | undefined;
+function describeTimeLeft(ledgers: number): string; // "about 6 days", "about 5 hours", "less than an hour"
+```
+
+A contract instance has a lifetime and expires if nobody extends it. The state records when, from the last lookup that found an instance, so you can see it coming: `ledgersUntilExpiry` is how many ledgers it had left at that lookup (never below zero, `undefined` when unknown), and `describeTimeLeft` turns a number of ledgers into rough words, at about 5 seconds a ledger. `EXPIRY_WARNING_LEDGERS` (120,960, about 7 days) is the point below which `wasmward check` suggests extending. This is a snapshot taken at the last check, not a countdown, and it is informational: it never changes a status or whether writes are allowed.
 
 ### `createRpcClient(url, timeoutMs)`
 

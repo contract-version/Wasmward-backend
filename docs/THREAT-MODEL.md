@@ -48,7 +48,7 @@ These are assumptions, not defences. If one fails, the guarantee can fail with i
 - **Check compatibility.** It does not read a contract's interface, storage layout or behaviour. For that, use a tool such as soroban-upgrade-safeguard before you add a hash ([pairing guide](PAIRING.md)).
 - **See other contracts.** If a listed contract calls another contract that gets upgraded, only the listed one is guarded. List every contract your app depends on.
 - **See the contract's code entry.** It reads the instance's executable hash. The Wasm code itself is a separate ledger entry with its own lifetime, and Wasmward never inspects it. If that entry has expired, calls fail rather than misbehave, so this costs availability, not safety.
-- **Warn that an instance is about to expire.** It reports `archived` only after the instance's lifetime has ended.
+- **Act on an instance that is about to expire.** It records how long the instance had left at the last check and `wasmward check` shows it, with a nudge under about a week, but this never changes a status or blocks a write. It reports `archived` only after the lifetime has ended, and says nothing about the separate code entry.
 - **See a pending upgrade** (a timelock or multisig that has not executed yet).
 - **Protect a transaction already submitted.** It gates the decision to send.
 - **Verify what an external-reference executable runs.** Those contracts are reported as an error and blocked.

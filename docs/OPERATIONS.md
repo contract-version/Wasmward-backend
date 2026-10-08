@@ -148,6 +148,20 @@ Be clear about what a guard can and cannot do.
 - **Contracts that are not Wasm-backed are blocked.** A Stellar Asset Contract is reported `stellar-asset` and a contract using an external-reference executable is reported as an error, because Wasmward cannot verify either.
 - **An expired (archived) instance is blocked** until it is restored. The RPC may report an expired instance as missing; both block writes.
 
+## Contracts expire
+
+A contract instance has a lifetime, and if nobody extends it, it expires and its writes stop working until it is restored. `wasmward check` shows how long each supported contract has left, using what the RPC reported at the last check:
+
+```text
+vault  supported (v1)  a7a8...  (expires in about 29 days)
+vault  supported (v1)  a7a8...  (expires in about 6 days; extend its lifetime soon)
+```
+
+- The note says "extend its lifetime soon" when under about 7 days remain. That figure is a convention, not a network rule, and ledger time is only about 5 seconds a ledger, so treat the days as rough.
+- It is informational. It never changes a status or an exit code, so a pipeline will not fail because of it. If you want it to, read `contracts.<name>.ledgersUntilExpiry` from `check --json` (or from `guard.health()`) and compare it with your own threshold.
+- Extending a contract is done with the Stellar CLI (`stellar contract extend`) or from your own tooling. The test contract in [Wasmward-contract](https://github.com/contract-version/Wasmward-contract) has `scripts/extend.sh` for exactly this.
+- The figure is for the instance only. The contract's Wasm code is a separate ledger entry with its own lifetime that Wasmward does not look at ([threat model](THREAT-MODEL.md)), so extend both.
+
 ## Reading the status
 
 | Status | What to do |
@@ -156,7 +170,7 @@ Be clear about what a guard can and cannot do.
 | `pending` | The first check has not finished, or has only failed. Check the RPC URL and network. |
 | `unsupported` | The contract was upgraded to code you have not added. Add the hash if the app is compatible, otherwise release a compatible app first. |
 | `missing` | No contract at that ID on this network. Usually a wrong ID or a wrong network. |
-| `archived` | The contract instance expired. Restore it. |
+| `archived` | The contract instance expired. Restore it. Catch it earlier: see "Contracts expire" below. |
 | `stellar-asset` | You configured a Stellar Asset Contract, which is not a Wasm contract. Remove it from the config. |
 | `stale` | The last good check is too old. The RPC is failing, or the guard was stopped. |
 

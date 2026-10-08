@@ -20,6 +20,7 @@ First release. Set the date when the version is tagged.
 - `wasmward watch`: keeps checking and prints each status change, as text or JSON lines, until interrupted with Ctrl+C or SIGTERM.
 - Several networks in one config file: a `networks` section whose entries have the single-network shape. Choosing a network is always explicit (`loadConfig(file, { network })`, `--network <name>`), and `wasmward check` without `--network` checks every network. Adds `loadConfigDocument`, `loadConfigDocumentFile` and the `ConfigDocument` type.
 - `subscribe` now announces `supported -> stale` the moment it happens, using a timer, instead of at the next poll. `pollIntervalMs` is limited to one day, and no poll or staleness delay can exceed what a timer can wait.
+- `wasmward check` shows how long each contract instance has left (and suggests extending when under about a week); the state and health report carry `liveUntilLedger`, `latestLedger` and `ledgersUntilExpiry`. Informational only.
 - `docs/THREAT-MODEL.md`: the guarantee, what it defends against, what it trusts, and what it cannot do.
 - The published package is tested as installed: loaded with `import` and `require`, and type-checked from TypeScript for both module systems.
 - RPC requests are really cancelled after their timeout (`createRpcClient`), so an RPC that never answers cannot leave connections open or make `wasmward check` hang.

@@ -373,3 +373,13 @@
 **Notes**
 - A full read of the CLI for logic errors found nothing new; the earlier review rounds (D-022) had caught that class of bug.
 - Writing the threat model surfaced one limit that had not been written down: the contract's code ledger entry is never inspected (D-026).
+
+## Extra: how long an instance has left
+
+**Date:** 2026-10-08
+
+**Built** (D-027): the instance's expiry is recorded from each lookup; `wasmward check` shows how long is left and suggests extending under about a week; the health report has `ledgersUntilExpiry`. Informational only. In `Wasmward-contract`: `scripts/extend.sh`.
+
+**Results**
+- `pnpm test:coverage`: all tests pass (21 new); typecheck, lint and build clean.
+- Live testnet: it reported the fixture as expiring in about 6 days. The fixture was extended and `check` then showed about 29 days.
