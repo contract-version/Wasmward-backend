@@ -1,7 +1,6 @@
-import { rpc } from '@stellar/stellar-sdk';
-import { loadConfig, usesPlainHttp } from './config.js';
+import { loadConfig } from './config.js';
 import { ConfigError, WriteBlockedError } from './errors.js';
-import { createEndpointSet, type GuardServer } from './endpoints.js';
+import { createEndpointSet, createRpcClient, type GuardServer } from './endpoints.js';
 import { buildHealth, type HealthReport } from './health.js';
 import { createPoller, MAX_TIMER_MS } from './poller.js';
 import { describeBlock, effectiveStatus, initialState, isWritable, nextState } from './state.js';
@@ -62,8 +61,8 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
   const lookupTimeoutMs = Math.min(config.pollIntervalMs, MAX_LOOKUP_TIMEOUT_MS);
   const endpoints = createEndpointSet(
     [
-      options.server ?? rpcServerFor(config.network.rpcUrl),
-      ...(options.fallbackServers ?? config.network.fallbackRpcUrls.map(rpcServerFor)),
+      options.server ?? createRpcClient(config.network.rpcUrl, lookupTimeoutMs),
+      ...(options.fallbackServers ?? config.network.fallbackRpcUrls.map((url) => createRpcClient(url, lookupTimeoutMs))),
     ],
     config.network.passphrase,
     lookupTimeoutMs,
@@ -315,7 +314,3 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
   };
 }
 
-function rpcServerFor(url: string): GuardServer {
-  // The config only allows plain http for localhost and 127.0.0.1.
-  return new rpc.Server(url, { allowHttp: usesPlainHttp(url) });
-}

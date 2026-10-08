@@ -86,18 +86,22 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function rpcServerFor(url: string): Promise<GuardServer> {
-  const { rpc } = await import('@stellar/stellar-sdk');
-  const { usesPlainHttp } = await loadConfigModule();
-  return new rpc.Server(url, { allowHttp: usesPlainHttp(url) });
+/** How long one RPC request may take, which also bounds how long a hung RPC can keep the process alive. */
+function requestTimeoutMs(config: WasmwardConfig): number {
+  return Math.min(config.pollIntervalMs, MAX_LOOKUP_TIMEOUT_MS);
+}
+
+async function rpcServerFor(url: string, config: WasmwardConfig): Promise<GuardServer> {
+  const { createRpcClient } = await loadEndpointsModule();
+  return createRpcClient(url, requestTimeoutMs(config));
 }
 
 async function defaultServer(config: WasmwardConfig): Promise<GuardServer> {
-  return rpcServerFor(config.network.rpcUrl);
+  return rpcServerFor(config.network.rpcUrl, config);
 }
 
 async function defaultFallbackServers(config: WasmwardConfig): Promise<GuardServer[]> {
-  return Promise.all(config.network.fallbackRpcUrls.map(rpcServerFor));
+  return Promise.all(config.network.fallbackRpcUrls.map((url) => rpcServerFor(url, config)));
 }
 
 /** Writes through a temporary file in the same folder, then renames, so readers never see half a file. */
