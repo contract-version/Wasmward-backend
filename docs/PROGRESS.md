@@ -363,3 +363,13 @@
 - Everything passed: the CommonJS build and both sets of type declarations work as published. No package bug was found.
 - A deliberately broken CommonJS entry made the `require` case fail, so the test can catch that class of mistake.
 - `pnpm test:coverage`: all tests pass (5 new), lint, typecheck and build clean.
+
+## Extra: threat model
+
+**Date:** 2026-10-08
+
+**Built:** `docs/THREAT-MODEL.md` (D-026), linked from the README, `SECURITY.md` and the operations guide. Documentation only; no code changed.
+
+**Notes**
+- A full read of the CLI for logic errors found nothing new; the earlier review rounds (D-022) had caught that class of bug.
+- Writing the threat model surfaced one limit that had not been written down: the contract's code ledger entry is never inspected (D-026).
