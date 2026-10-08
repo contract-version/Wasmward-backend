@@ -1,5 +1,5 @@
 import { rpc } from '@stellar/stellar-sdk';
-import { loadConfig } from './config.js';
+import { loadConfig, usesPlainHttp } from './config.js';
 import { ConfigError, WriteBlockedError } from './errors.js';
 import { createEndpointSet, type GuardServer } from './endpoints.js';
 import { buildHealth, type HealthReport } from './health.js';
@@ -163,7 +163,9 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
     const at = now();
     let soonest = Number.POSITIVE_INFINITY;
     for (const state of states.values()) {
-      if (state.status !== 'supported' || state.lastSuccessAt === undefined) continue;
+      // Only a contract that is still fresh can go stale later. One that already has was announced by
+      // publish(), and waiting on it again would arm a zero-length timer over and over.
+      if (state.lastSuccessAt === undefined || effectiveStatus(state, at, maxStalenessMs) !== 'supported') continue;
       // A contract is stale once its last success is more than maxStalenessMs old.
       soonest = Math.min(soonest, state.lastSuccessAt + maxStalenessMs + 1 - at);
     }
@@ -171,7 +173,7 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
     staleTimer = setTimeout(() => {
       staleTimer = undefined;
       publish(contracts.keys());
-    }, Math.min(Math.max(soonest, 0), MAX_TIMER_MS));
+    }, Math.min(Math.max(soonest, 1), MAX_TIMER_MS));
     // Never keep a process alive just to announce a status change.
     if (typeof staleTimer === 'object' && typeof staleTimer.unref === 'function') staleTimer.unref();
   }
@@ -315,5 +317,5 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
 
 function rpcServerFor(url: string): GuardServer {
   // The config only allows plain http for localhost and 127.0.0.1.
-  return new rpc.Server(url, { allowHttp: url.startsWith('http://') });
+  return new rpc.Server(url, { allowHttp: usesPlainHttp(url) });
 }
