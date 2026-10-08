@@ -257,3 +257,15 @@
 - The Wasmward steps (`hash`, `check --json`, `add`, `check`) were run for real against the testnet fixture: candidate hash `ec040ead...`, live hash `a7a82511...`, config updated atomically, `check` exit 0 with both builds supported.
 - Writing the guide caught a real bug in its own first draft: reading the live hash through a pipe fails under `bash -e -o pipefail` when `check` exits 1. Fixed and re-tested.
 - The upstream safeguard repository did not compile on the default branch (D-016), so its commands are documented from its README and labelled as such.
+
+## Extra: browser example
+
+**Date:** 2026-10-08
+
+**Built** (in `Wasmward-frontend`)
+- `index.html`, `src/main.js`, `build.mjs`, `serve.mjs`, a README with run instructions and a walkthrough, and a CI workflow. A seed-backlog item built on request (D-017).
+
+**Results**
+- Ran in the built-in browser against live testnet: `pending -> supported` with the v1 hash and label, deposit worked, switching to the older build gave `unsupported`, a disabled button and the exact blocked message, and no console errors.
+- Phone-width check found a hash overflowing its container; fixed with `overflow-wrap`.
+- Frontend CI (clean checkout of both repositories, install, build, bundle check) passes.
