@@ -396,3 +396,15 @@
 - Backend: all tests pass (20 new); typecheck, lint and build clean.
 - Contract: fmt and clippy clean for both variants; both Wasm builds work and differ.
 - Frontend: verified in a real browser, including the warning state.
+
+## Extra: a reusable GitHub Action (all three repositories)
+
+**Date:** 2026-10-08
+
+**Backend** (D-029): `action.yml` and its tests; documented in the README, operations guide and changelog.
+**Contract:** the weekly health check now uses the action.
+**Frontend:** `wasmward.json`, an offline config-consistency step, and a `contract-alive` job that uses the action.
+
+**Results**
+- Backend: all tests pass (8 new); typecheck, lint and build clean.
+- GitHub: the action ran successfully in both other repositories against live testnet, and the fixture health workflow still passes.
