@@ -170,7 +170,7 @@ A listener that throws is ignored and never stops the guard. A change to `stale`
 
 ## Frontends
 
-Use the same `subscribe` call to disable write buttons:
+A complete, runnable page that does this against the testnet test contract, including a switch to see what an out-of-date build would show, is in [Wasmward-frontend](https://github.com/contract-version/Wasmward-frontend). The core of it:
 
 ```js
 guard.subscribe(({ name, to }) => {

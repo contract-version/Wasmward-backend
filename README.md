@@ -65,7 +65,7 @@ await guard.stop();
 
 If the test contract has expired, the example prints why writes are blocked instead of failing.
 
-In a browser, use `loadConfig` and `guard.subscribe` directly. `loadConfigFile` lives in `@wasmward/core/node`, so browser bundles never import `fs`.
+In a browser, use `loadConfig` and `guard.subscribe` directly. A complete, runnable page that does this is in [Wasmward-frontend](https://github.com/contract-version/Wasmward-frontend). `loadConfigFile` lives in `@wasmward/core/node`, so browser bundles never import `fs`.
 
 ## Command line
 
