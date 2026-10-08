@@ -20,6 +20,7 @@ First release. Set the date when the version is tagged.
 - `wasmward watch`: keeps checking and prints each status change, as text or JSON lines, until interrupted with Ctrl+C or SIGTERM.
 - Several networks in one config file: a `networks` section whose entries have the single-network shape. Choosing a network is always explicit (`loadConfig(file, { network })`, `--network <name>`), and `wasmward check` without `--network` checks every network. Adds `loadConfigDocument`, `loadConfigDocumentFile` and the `ConfigDocument` type.
 - `subscribe` now announces `supported -> stale` the moment it happens, using a timer, instead of at the next poll. `pollIntervalMs` is limited to one day, and no poll or staleness delay can exceed what a timer can wait.
+- RPC requests are really cancelled after their timeout (`createRpcClient`), so an RPC that never answers cannot leave connections open or make `wasmward check` hang.
 - Optional `network.fallbackRpcUrls`: when the primary RPC cannot answer, the guard and `wasmward check` fall back to the next endpoint. Each endpoint must report the configured network passphrase before it is used, and `health().network.usingFallback` shows when a spare is in use. Also exports `createEndpointSet` and the `WasmwardConfigInput` type.
 - A browser example in the `Wasmward-frontend` repository: a page that watches the test contract and disables a write button through `guard.subscribe`.
 - `docs/PAIRING.md`: how to use Wasmward together with soroban-upgrade-safeguard in a release workflow, with a GitHub Actions example.

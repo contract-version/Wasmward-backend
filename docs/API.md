@@ -345,6 +345,15 @@ type LiveExecutable =
 
 The pure status model. `nextState(prev, result, contractConfig, now, maxStalenessMs)` computes the next state; `effectiveStatus` and `isWritable` apply the call-time staleness rule. `describeBlock` produces the reason text used in `WriteBlockedError` (internal to the package, not exported from the main entry).
 
+### `createRpcClient(url, timeoutMs)`
+
+```ts
+function createRpcClient(url: string, timeoutMs: number): GuardServer;
+const CLIENT_ABORT_SLACK_MS: number; // 1000
+```
+
+The RPC client the guard and the CLI use by default: a Stellar `rpc.Server` whose requests are really cancelled after `timeoutMs` plus a second of slack. Use it if you build your own `GuardServer` and want the same behaviour. A plain `rpc.Server` never abandons a request: its `timeout` option is not read by @stellar/stellar-sdk 17.2.1, so a hung RPC would keep its connection open (and keep a short-lived process such as a script alive) indefinitely. Plain http is allowed for `http://` URLs of any letter case; the config decides which hosts may use it.
+
 ### `createEndpointSet(servers, passphrase, timeoutMs)`
 
 The failover logic behind the guard and `wasmward check`. Takes the primary and fallbacks as `GuardServer`s and returns `{ verifyNetwork(), lookup(contractIds, timeoutMs), usingFallback }`. With one server it behaves exactly like that server alone.

@@ -332,3 +332,15 @@
 **Open**
 - A hung RPC leaves its socket open, because the SDK's `timeout` option is unused in 17.2.1. Not a correctness problem; to be fixed and tested before 0.1.0 is published (D-022).
 - The browser example's build selector is not serialised against rapid changes.
+
+## Extra: hung RPC requests are cancelled
+
+**Date:** 2026-10-08
+
+**Fixed** (D-023): the open item from the review round. A request to an RPC that never answers is now cancelled after its timeout, so it no longer leaves connections open, and `wasmward check` no longer hangs in that case.
+
+**Results**
+- `pnpm test:coverage`: 572 tests pass (6 new), 99.6% lines; typecheck, lint and build clean.
+- The real-process test hangs without the fix (60 s limit hit) and passes in about 6 s with it.
+
+**Still open:** the browser example's build selector is not serialised against rapid changes (D-022).
