@@ -67,6 +67,10 @@ export interface ContractState {
   status: Status;
   /** Lowercase hex Wasm hash seen on the last successful lookup that found Wasm. */
   liveWasmHash?: string;
+  /** Ledger after which the contract instance expires, as of the last lookup that found one. */
+  liveUntilLedger?: number;
+  /** The latest ledger the RPC reported on that lookup, so the two can be compared. */
+  latestLedger?: number;
   /** Label of the supported version the live hash matched, when it has one. */
   matchedLabel?: string;
   /** Time of the last lookup, successful or not. */

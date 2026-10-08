@@ -12,7 +12,16 @@ export { hashWasm } from './hash.js';
 export type { ContractHealth, HealthReport } from './health.js';
 export { createPoller, nextDelayMs, MAX_TIMER_MS } from './poller.js';
 export type { Poller, PollerOptions } from './poller.js';
-export { effectiveStatus, initialState, isWritable, nextState } from './state.js';
+export {
+  describeTimeLeft,
+  effectiveStatus,
+  EXPIRY_WARNING_LEDGERS,
+  initialState,
+  isWritable,
+  ledgersUntilExpiry,
+  nextState,
+  SECONDS_PER_LEDGER,
+} from './state.js';
 export type {
   ContractConfig,
   ContractState,

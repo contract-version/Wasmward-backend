@@ -7,7 +7,7 @@ import { ConfigError } from './errors.js';
 import type { GuardServer } from './guard.js';
 import { hashWasm } from './hash.js';
 import { buildHealth, type HealthReport } from './health.js';
-import { describeBlock, initialState, nextState } from './state.js';
+import { describeBlock, describeTimeLeft, EXPIRY_WARNING_LEDGERS, initialState, ledgersUntilExpiry, nextState } from './state.js';
 import type { ContractState, WasmwardConfig } from './types.js';
 
 // The Stellar SDK is large and slow to load. These modules pull it in, so they are imported only by
@@ -423,6 +423,14 @@ async function watchCommand(options: { config: string; network: string | undefin
   return EXIT_OK;
 }
 
+/** How long the instance has left, and a nudge when it is short. Informational: it never changes a status. */
+function expiryNote(state: ContractState): string {
+  const remaining = ledgersUntilExpiry(state);
+  if (remaining === undefined) return '';
+  const soon = remaining < EXPIRY_WARNING_LEDGERS ? '; extend its lifetime soon' : '';
+  return `  (expires in ${describeTimeLeft(remaining)}${soon})`;
+}
+
 function renderCheck(states: ContractState[], config: WasmwardConfig, now: number): string {
   const width = Math.max(...states.map((state) => state.name.length));
   const lines = [`Network: ${config.network.passphrase}`];
@@ -432,7 +440,7 @@ function renderCheck(states: ContractState[], config: WasmwardConfig, now: numbe
     if (state.status === 'supported') {
       supported += 1;
       const matched = state.matchedLabel === undefined ? '' : ` (${state.matchedLabel})`;
-      lines.push(`${label}  supported${matched}  ${state.liveWasmHash ?? ''}`);
+      lines.push(`${label}  supported${matched}  ${state.liveWasmHash ?? ''}${expiryNote(state)}`);
     } else {
       lines.push(`${label}  ${state.status}: ${describeBlock(state, now, config.maxStalenessMs)}`);
     }

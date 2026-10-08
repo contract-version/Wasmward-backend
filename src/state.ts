@@ -60,6 +60,8 @@ export function nextState(
   switch (result.kind) {
     case 'wasm': {
       next.liveWasmHash = result.wasmHash;
+      next.liveUntilLedger = result.liveUntilLedger;
+      next.latestLedger = result.latestLedger;
       const match = cfg.supported.find((version) => version.wasmHash === result.wasmHash);
       if (match === undefined) {
         next.status = 'unsupported';
@@ -77,6 +79,8 @@ export function nextState(
       return next;
     case 'archived':
       next.status = 'archived';
+      next.liveUntilLedger = result.liveUntilLedger;
+      next.latestLedger = result.latestLedger;
       return next;
   }
 }
@@ -111,4 +115,27 @@ export function describeBlock(state: ContractState, now: number, maxStalenessMs:
       return `the last successful check ${when}, outside the allowed ${seconds(maxStalenessMs)}${lastError}`;
     }
   }
+}
+
+/** Stellar closes a ledger about every 5 seconds. Used only to turn a number of ledgers into a rough time. */
+export const SECONDS_PER_LEDGER = 5;
+
+/** An instance with less than this many ledgers left (about 7 days) is worth extending soon. */
+export const EXPIRY_WARNING_LEDGERS = (7 * 24 * 60 * 60) / SECONDS_PER_LEDGER;
+
+/**
+ * How many ledgers the instance had left when it was last looked up, or undefined when that is not known.
+ * Zero means it had already reached the end of its life. This is a snapshot: it does not count down.
+ */
+export function ledgersUntilExpiry(state: ContractState): number | undefined {
+  if (state.liveUntilLedger === undefined || state.latestLedger === undefined) return undefined;
+  return Math.max(0, state.liveUntilLedger - state.latestLedger);
+}
+
+/** A rough, human time for a number of ledgers, such as "about 6 days" or "about 5 hours". */
+export function describeTimeLeft(ledgers: number): string {
+  const seconds = ledgers * SECONDS_PER_LEDGER;
+  if (seconds < 60 * 60) return 'less than an hour';
+  if (seconds < 2 * 24 * 60 * 60) return `about ${Math.round(seconds / 3600)} hours`;
+  return `about ${Math.round(seconds / 86_400)} days`;
 }
