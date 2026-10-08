@@ -2,7 +2,7 @@ export { loadConfig, loadConfigDocument, DEFAULT_POLL_INTERVAL_MS, MIN_POLL_INTE
 export type { ConfigDocument } from './config.js';
 export { ConfigError, WriteBlockedError } from './errors.js';
 export type { ConfigIssue } from './errors.js';
-export { createEndpointSet, PRIMARY_RETRY_EVERY } from './endpoints.js';
+export { CLIENT_ABORT_SLACK_MS, createEndpointSet, createRpcClient, PRIMARY_RETRY_EVERY } from './endpoints.js';
 export type { EndpointSet } from './endpoints.js';
 export { fetchExecutables, MAX_KEYS_PER_REQUEST } from './fetch.js';
 export type { LedgerEntriesSource } from './fetch.js';

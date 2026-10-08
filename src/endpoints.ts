@@ -1,3 +1,5 @@
+import { rpc } from '@stellar/stellar-sdk';
+import { usesPlainHttp } from './config.js';
 import { ConfigError } from './errors.js';
 import { fetchExecutables, withTimeout, type LedgerEntriesSource } from './fetch.js';
 import type { LiveExecutable } from './types.js';
@@ -5,6 +7,26 @@ import type { LiveExecutable } from './types.js';
 /** The parts of `rpc.Server` the guard uses. `rpc.Server` satisfies it. */
 export interface GuardServer extends LedgerEntriesSource {
   getNetwork(): Promise<{ passphrase: string }>;
+}
+
+/**
+ * How long past a lookup's own timeout the HTTP request itself is allowed to live. The lookup gives up at its
+ * timeout with a clear message; this slack makes sure that message, not a transport error, is the one reported.
+ */
+export const CLIENT_ABORT_SLACK_MS = 1_000;
+
+/**
+ * An RPC client that really abandons a request that takes too long.
+ *
+ * Giving up on a request is not the same as cancelling it: without a transport timeout a hung RPC leaves
+ * its connection open, one per poll during an outage, and keeps a short-lived process such as the CLI
+ * alive after it has already printed its answer. `rpc.Server` declares a `timeout` option but, in
+ * @stellar/stellar-sdk 17.2.1, never reads it, so the timeout is set on the HTTP client the SDK does use.
+ */
+export function createRpcClient(url: string, timeoutMs: number): GuardServer {
+  const client = new rpc.Server(url, { allowHttp: usesPlainHttp(url) });
+  client.httpClient.defaults.timeout = timeoutMs + CLIENT_ABORT_SLACK_MS;
+  return client;
 }
 
 /** While running on a fallback, the primary endpoint is tried first again once in this many lookups. */
