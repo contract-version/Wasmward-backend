@@ -1,6 +1,8 @@
-export { loadConfig, DEFAULT_POLL_INTERVAL_MS, MIN_POLL_INTERVAL_MS } from './config.js';
+export { loadConfig, DEFAULT_POLL_INTERVAL_MS, MIN_POLL_INTERVAL_MS, MAX_FALLBACK_RPC_URLS } from './config.js';
 export { ConfigError, WriteBlockedError } from './errors.js';
 export type { ConfigIssue } from './errors.js';
+export { createEndpointSet, PRIMARY_RETRY_EVERY } from './endpoints.js';
+export type { EndpointSet } from './endpoints.js';
 export { fetchExecutables, MAX_KEYS_PER_REQUEST } from './fetch.js';
 export type { LedgerEntriesSource } from './fetch.js';
 export { createVersionGuard } from './guard.js';
@@ -18,4 +20,5 @@ export type {
   Status,
   SupportedVersion,
   WasmwardConfig,
+  WasmwardConfigInput,
 } from './types.js';

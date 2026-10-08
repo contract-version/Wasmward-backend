@@ -14,6 +14,16 @@ const CONTRACT_NAME = /^[a-z0-9][a-z0-9-_]{0,63}$/;
 const WASM_HASH = /^[0-9a-fA-F]{64}$/;
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1']);
 
+/** Compares URLs without caring about case in the host, a default port, or a trailing slash. */
+function normalizeUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, '')}${url.search}`;
+  } catch {
+    return value;
+  }
+}
+
 function isAllowedRpcUrl(value: string): boolean {
   let url: URL;
   try {
@@ -56,12 +66,34 @@ const contractSchema = z
     });
   });
 
-const networkSchema = z.strictObject({
-  rpcUrl: z
-    .string()
-    .refine(isAllowedRpcUrl, 'must be an https URL (http is allowed only for localhost or 127.0.0.1)'),
-  passphrase: z.string().min(1, 'must not be empty'),
-});
+const rpcUrlSchema = z
+  .string()
+  .refine(isAllowedRpcUrl, 'must be an https URL (http is allowed only for localhost or 127.0.0.1)');
+
+/** At most this many fallbacks: more only slows a failing lookup down. */
+export const MAX_FALLBACK_RPC_URLS = 4;
+
+const networkSchema = z
+  .strictObject({
+    rpcUrl: rpcUrlSchema,
+    fallbackRpcUrls: z
+      .array(rpcUrlSchema)
+      .max(MAX_FALLBACK_RPC_URLS, `must list at most ${MAX_FALLBACK_RPC_URLS} URLs`)
+      .optional(),
+    passphrase: z.string().min(1, 'must not be empty'),
+  })
+  .superRefine((network, ctx) => {
+    // Repeating an endpoint only makes a failing lookup slower, and usually means a typo.
+    const seen = new Map<string, string>([[normalizeUrl(network.rpcUrl), 'rpcUrl']]);
+    (network.fallbackRpcUrls ?? []).forEach((url, index) => {
+      const where = seen.get(normalizeUrl(url));
+      if (where === undefined) {
+        seen.set(normalizeUrl(url), `fallbackRpcUrls[${index}]`);
+      } else {
+        ctx.addIssue({ code: 'custom', path: ['fallbackRpcUrls', index], message: `duplicate of ${where}` });
+      }
+    });
+  });
 
 const configSchema = z
   .strictObject({
@@ -100,7 +132,11 @@ const configSchema = z
     }
     return {
       version: 1,
-      network: { rpcUrl: config.network.rpcUrl, passphrase: config.network.passphrase },
+      network: {
+        rpcUrl: config.network.rpcUrl,
+        fallbackRpcUrls: config.network.fallbackRpcUrls ?? [],
+        passphrase: config.network.passphrase,
+      },
       pollIntervalMs,
       maxStalenessMs: config.maxStalenessMs ?? pollIntervalMs * DEFAULT_STALENESS_FACTOR,
       contracts,

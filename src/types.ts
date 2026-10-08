@@ -15,9 +15,19 @@ export interface ContractConfig {
 
 export interface NetworkConfig {
   rpcUrl: string;
+  /** Other RPC endpoints to use, in order, when the primary cannot answer. Often empty. */
+  fallbackRpcUrls: string[];
   /** Network passphrase the RPC must report. A mismatch prevents start. */
   passphrase: string;
 }
+
+/**
+ * A config as you may write it in code: the same as {@link WasmwardConfig}, except that
+ * `network.fallbackRpcUrls` may be left out. `createVersionGuard` accepts this and validates it again.
+ */
+export type WasmwardConfigInput = Omit<WasmwardConfig, 'network'> & {
+  network: Omit<NetworkConfig, 'fallbackRpcUrls'> & { fallbackRpcUrls?: string[] };
+};
 
 /** A validated config with every default applied. */
 export interface WasmwardConfig {

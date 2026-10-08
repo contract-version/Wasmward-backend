@@ -23,6 +23,8 @@ export interface HealthReport {
     passphrase: string;
     /** False until `start()` has confirmed the RPC serves this network. */
     verified: boolean;
+    /** True when the latest successful lookup came from a fallback RPC endpoint, not the primary. */
+    usingFallback: boolean;
   };
   contracts: Record<string, ContractHealth>;
   /** Milliseconds since the Unix epoch when this report was computed. */
@@ -35,7 +37,7 @@ export interface HealthReport {
  */
 export function buildHealth(
   states: Iterable<ContractState>,
-  options: { passphrase: string; networkVerified: boolean; now: number; maxStalenessMs: number },
+  options: { passphrase: string; networkVerified: boolean; usingFallback?: boolean; now: number; maxStalenessMs: number },
 ): HealthReport {
   const contracts: Record<string, ContractHealth> = {};
   let allSupported = true;
@@ -59,7 +61,11 @@ export function buildHealth(
 
   return {
     ok: options.networkVerified && allSupported,
-    network: { passphrase: options.passphrase, verified: options.networkVerified },
+    network: {
+      passphrase: options.passphrase,
+      verified: options.networkVerified,
+      usingFallback: options.usingFallback ?? false,
+    },
     contracts,
     checkedAt: options.now,
   };

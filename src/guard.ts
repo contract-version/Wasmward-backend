@@ -1,23 +1,22 @@
 import { rpc } from '@stellar/stellar-sdk';
 import { loadConfig } from './config.js';
 import { ConfigError, WriteBlockedError } from './errors.js';
-import { fetchExecutables, type LedgerEntriesSource } from './fetch.js';
+import { createEndpointSet, type GuardServer } from './endpoints.js';
 import { buildHealth, type HealthReport } from './health.js';
 import { createPoller } from './poller.js';
 import { describeBlock, effectiveStatus, initialState, isWritable, nextState } from './state.js';
-import type { ContractConfig, ContractState, LiveExecutable, Status, WasmwardConfig } from './types.js';
+import type { ContractConfig, ContractState, LiveExecutable, Status, WasmwardConfigInput } from './types.js';
 
 /** A single lookup waits at most this long, and never longer than one poll interval. */
 const MAX_LOOKUP_TIMEOUT_MS = 10_000;
 
-/** The parts of `rpc.Server` the guard uses. `rpc.Server` satisfies it. */
-export interface GuardServer extends LedgerEntriesSource {
-  getNetwork(): Promise<{ passphrase: string }>;
-}
+export type { GuardServer };
 
 export interface VersionGuardOptions {
   /** RPC client to use. Defaults to `new rpc.Server(config.network.rpcUrl)`. */
   server?: GuardServer;
+  /** RPC clients to fall back to, in order. Defaults to one client per `network.fallbackRpcUrls` entry. */
+  fallbackServers?: GuardServer[];
   /** Clock in milliseconds since the Unix epoch. Defaults to `Date.now`. */
   now?: () => number;
 }
@@ -55,17 +54,20 @@ export interface VersionGuard {
   health(): HealthReport;
 }
 
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-export function createVersionGuard(input: WasmwardConfig, options: VersionGuardOptions = {}): VersionGuard {
+export function createVersionGuard(input: WasmwardConfigInput, options: VersionGuardOptions = {}): VersionGuard {
   // Validate again so a hand-built or edited object can never bypass the schema rules.
   const config = loadConfig(input);
   const now = options.now ?? Date.now;
-  const server: GuardServer = options.server ?? defaultServer(config);
   const { maxStalenessMs } = config;
   const lookupTimeoutMs = Math.min(config.pollIntervalMs, MAX_LOOKUP_TIMEOUT_MS);
+  const endpoints = createEndpointSet(
+    [
+      options.server ?? rpcServerFor(config.network.rpcUrl),
+      ...(options.fallbackServers ?? config.network.fallbackRpcUrls.map(rpcServerFor)),
+    ],
+    config.network.passphrase,
+    lookupTimeoutMs,
+  );
 
   // A Map, not the config object, so names like "constructor" are never found by inheritance.
   const contracts = new Map<string, ContractConfig>(Object.entries(config.contracts));
@@ -145,7 +147,7 @@ export function createVersionGuard(input: WasmwardConfig, options: VersionGuardO
   async function tick(): Promise<boolean> {
     const startedAt = now();
     const ids = [...contracts.values()].map((contract) => contract.contractId);
-    const results = await fetchExecutables(server, ids, lookupTimeoutMs);
+    const results = await endpoints.lookup(ids, lookupTimeoutMs);
     let everyLookupFailed = true;
     for (const [name, contract] of contracts) {
       const result = results.get(contract.contractId) ?? { kind: 'error' as const, message: 'no result returned' };
@@ -180,7 +182,7 @@ export function createVersionGuard(input: WasmwardConfig, options: VersionGuardO
     if (!networkVerified) throw blocked(name, 'the guard has not been started, so the network is not verified');
     const startedAt = now();
     const result =
-      (await fetchExecutables(server, [contract.contractId], lookupTimeoutMs)).get(contract.contractId) ??
+      (await endpoints.lookup([contract.contractId], lookupTimeoutMs)).get(contract.contractId) ??
       ({ kind: 'error', message: 'no result returned' } as const);
     apply(name, result, startedAt);
     emit(collectChanges([name]));
@@ -197,17 +199,8 @@ export function createVersionGuard(input: WasmwardConfig, options: VersionGuardO
       const epoch = stopEpoch;
       const attempt = (async (): Promise<void> => {
         if (!networkVerified) {
-          let passphrase: string;
-          try {
-            passphrase = (await server.getNetwork()).passphrase;
-          } catch (error) {
-            throw new Error(`Could not verify the network: ${messageOf(error)}`, { cause: error });
-          }
-          if (passphrase !== config.network.passphrase) {
-            throw new ConfigError(
-              `The RPC serves network "${passphrase}" but the config expects "${config.network.passphrase}".`,
-            );
-          }
+          // Throws ConfigError when the primary serves another network, or Error when nothing answers.
+          await endpoints.verifyNetwork();
           networkVerified = true;
         }
         // A stop() that arrived while the network was being checked cancels this start.
@@ -271,6 +264,7 @@ export function createVersionGuard(input: WasmwardConfig, options: VersionGuardO
       return buildHealth(states.values(), {
         passphrase: config.network.passphrase,
         networkVerified,
+        usingFallback: endpoints.usingFallback,
         now: now(),
         maxStalenessMs,
       });
@@ -278,7 +272,7 @@ export function createVersionGuard(input: WasmwardConfig, options: VersionGuardO
   };
 }
 
-function defaultServer(config: WasmwardConfig): GuardServer {
+function rpcServerFor(url: string): GuardServer {
   // The config only allows plain http for localhost and 127.0.0.1.
-  return new rpc.Server(config.network.rpcUrl, { allowHttp: config.network.rpcUrl.startsWith('http://') });
+  return new rpc.Server(url, { allowHttp: url.startsWith('http://') });
 }

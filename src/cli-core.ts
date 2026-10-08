@@ -13,7 +13,7 @@ import type { ContractState, WasmwardConfig } from './types.js';
 // the commands that need them, which keeps `wasmward hash` instant.
 const loadConfigModule = () => import('./config.js');
 const loadNodeModule = () => import('./node.js');
-const loadFetchModule = () => import('./fetch.js');
+const loadEndpointsModule = () => import('./endpoints.js');
 const loadGuardModule = () => import('./guard.js');
 
 /** Exit codes, as documented for deploy gates. */
@@ -54,6 +54,8 @@ export interface CliIo {
   stderr: (text: string) => void;
   /** Builds the RPC client `check` uses. Defaults to a real `rpc.Server`. */
   createServer?: (config: WasmwardConfig) => GuardServer | Promise<GuardServer>;
+  /** Builds the fallback RPC clients `check` may use. Defaults to one `rpc.Server` per `fallbackRpcUrls` entry. */
+  createFallbackServers?: (config: WasmwardConfig) => GuardServer[] | Promise<GuardServer[]>;
   /** Clock in milliseconds since the Unix epoch. Defaults to `Date.now`. */
   now?: () => number;
   /** Ends `watch` when aborted. The entry point aborts it on Ctrl+C or SIGTERM. */
@@ -73,9 +75,17 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function defaultServer(config: WasmwardConfig): Promise<GuardServer> {
+async function rpcServerFor(url: string): Promise<GuardServer> {
   const { rpc } = await import('@stellar/stellar-sdk');
-  return new rpc.Server(config.network.rpcUrl, { allowHttp: config.network.rpcUrl.startsWith('http://') });
+  return new rpc.Server(url, { allowHttp: url.startsWith('http://') });
+}
+
+async function defaultServer(config: WasmwardConfig): Promise<GuardServer> {
+  return rpcServerFor(config.network.rpcUrl);
+}
+
+async function defaultFallbackServers(config: WasmwardConfig): Promise<GuardServer[]> {
+  return Promise.all(config.network.fallbackRpcUrls.map(rpcServerFor));
 }
 
 /** Writes through a temporary file in the same folder, then renames, so readers never see half a file. */
@@ -236,26 +246,27 @@ function renderCheck(states: ContractState[], config: WasmwardConfig, now: numbe
 
 async function checkCommand(options: { config: string; json: boolean }, io: CliIo): Promise<number> {
   const { loadConfigFile } = await loadNodeModule();
-  const { fetchExecutables, withTimeout } = await loadFetchModule();
+  const { createEndpointSet } = await loadEndpointsModule();
   const config = await loadConfigFile(options.config);
-  const server = await (io.createServer ?? defaultServer)(config);
+  const servers = [
+    await (io.createServer ?? defaultServer)(config),
+    ...(await (io.createFallbackServers ?? defaultFallbackServers)(config)),
+  ];
   const now = io.now ?? Date.now;
   const timeoutMs = Math.min(config.pollIntervalMs, MAX_LOOKUP_TIMEOUT_MS);
+  const endpoints = createEndpointSet(servers, config.network.passphrase, timeoutMs);
 
-  let passphrase: string;
+  // A wrong network is a ConfigError and ends the command with exit code 2; so does an unreachable RPC.
   try {
-    passphrase = (await withTimeout(server.getNetwork(), timeoutMs, 'getNetwork')).passphrase;
+    await endpoints.verifyNetwork();
   } catch (error) {
-    throw new CliError(`Could not reach the RPC to verify the network: ${messageOf(error)}`);
-  }
-  if (passphrase !== config.network.passphrase) {
-    throw new CliError(`The RPC serves network "${passphrase}" but the config expects "${config.network.passphrase}".`);
+    if (error instanceof ConfigError) throw error;
+    throw new CliError(messageOf(error));
   }
 
   const startedAt = now();
   const names = Object.keys(config.contracts);
-  const results = await fetchExecutables(
-    server,
+  const results = await endpoints.lookup(
     names.map((name) => config.contracts[name]?.contractId ?? ''),
     timeoutMs,
   );
@@ -274,8 +285,9 @@ async function checkCommand(options: { config: string; json: boolean }, io: CliI
 
   if (options.json) {
     const report = buildHealth(states, {
-      passphrase,
+      passphrase: config.network.passphrase,
       networkVerified: true,
+      usingFallback: endpoints.usingFallback,
       now: startedAt,
       maxStalenessMs: config.maxStalenessMs,
     });
