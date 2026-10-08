@@ -6,7 +6,7 @@ How to run Wasmward safely in production, and what it cannot do.
 
 | Setting | Default | Guidance |
 |---|---|---|
-| `pollIntervalMs` | 30000 | Fine for most apps. Use 10000 if writes are high value and you can afford the RPC traffic. The minimum is 5000. |
+| `pollIntervalMs` | 30000 | Fine for most apps. Use 10000 if writes are high value and you can afford the RPC traffic. The minimum is 5000 and the maximum is one day. |
 | `maxStalenessMs` | 4 times the poll interval (120000) | How old the last successful check may be before writes are blocked. It must be at least 2 times the poll interval. |
 
 Things to weigh:
@@ -220,7 +220,7 @@ guard.subscribe(({ name, from, to, state }) => {
 });
 ```
 
-A listener that throws is ignored and never stops the guard. A change to `stale` caused only by time passing, with checks no longer completing, is not announced; `isWritable` and `health` still report it. Alert on `health().ok` from outside as well.
+A listener that throws is ignored and never stops the guard. A contract that goes `stale` is announced the moment it happens, even if checks are failing or hanging, so a listener sees `supported -> stale` on time; stopping the guard stops these announcements. Alert on `health().ok` from outside as well.
 
 ## Frontends
 

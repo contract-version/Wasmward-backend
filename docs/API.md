@@ -47,7 +47,7 @@ await deposit(amount); // throws WriteBlockedError if the live code is not suppo
 | `network.rpcUrl` | `https`, or `http` only for `localhost` or `127.0.0.1`. |
 | `network.fallbackRpcUrls` | Optional list of up to 4 more RPC URLs, tried in order when the primary cannot answer. Same https rule; no repeats of `rpcUrl` or each other. Default `[]`. See [Using more than one RPC endpoint](OPERATIONS.md#using-more-than-one-rpc-endpoint). |
 | `network.passphrase` | Non-empty. `start()` fails if the RPC reports a different one. Every fallback must report the same one before it is used. |
-| `pollIntervalMs` | Integer, at least 5000. Default 30000. |
+| `pollIntervalMs` | Integer from 5000 to 86400000 (one day). Default 30000. |
 | `maxStalenessMs` | Integer, at least 2 times `pollIntervalMs`. Default 4 times `pollIntervalMs`. |
 | `contracts` | At least one. Names match `^[a-z0-9][a-z0-9-_]{0,63}$`. |
 | `contracts.*.contractId` | A valid contract address (`StrKey.isValidContract`). |
@@ -127,7 +127,7 @@ await deposit(amount); // throws WriteBlockedError if the live code is not suppo
 | `network.rpcUrl` | `https`, or `http` only for `localhost` or `127.0.0.1`. |
 | `network.fallbackRpcUrls` | Optional list of up to 4 more RPC URLs, tried in order when the primary cannot answer. Same https rule; no repeats of `rpcUrl` or each other. Default `[]`. See [Using more than one RPC endpoint](OPERATIONS.md#using-more-than-one-rpc-endpoint). |
 | `network.passphrase` | Non-empty. `start()` fails if the RPC reports a different one. Every fallback must report the same one before it is used. |
-| `pollIntervalMs` | Integer, at least 5000. Default 30000. |
+| `pollIntervalMs` | Integer from 5000 to 86400000 (one day). Default 30000. |
 | `maxStalenessMs` | Integer, at least 2 times `pollIntervalMs`. Default 4 times `pollIntervalMs`. |
 | `contracts` | At least one. Names match `^[a-z0-9][a-z0-9-_]{0,63}$`. |
 | `contracts.*.contractId` | A valid contract address (`StrKey.isValidContract`). |
@@ -270,7 +270,9 @@ const unsubscribe = guard.subscribe((change) => {
 });
 ```
 
-Called once per status change, not on every poll. Each listener receives its own copy of the state. A listener that throws or rejects is ignored: it never stops the poller or other listeners. Changes are reported when a check completes, so with the poller stopped, becoming `stale` through time alone is not announced; `status()` and `isWritable()` still report it.
+Called once per status change, not on every poll. Each listener receives its own copy of the state. A listener that throws or rejects is ignored: it never stops the poller or other listeners.
+
+**Becoming `stale` is announced on time.** A supported contract goes stale just by time passing, so while the guard is running a timer announces `supported -> stale` the moment the last good check becomes more than `maxStalenessMs` old, without waiting for the next poll (which, during an outage, can be well after). Calling `stop()` ends these announcements along with polling; `status()` and `isWritable()` stay correct regardless.
 
 ### `guard.health()`
 
@@ -347,6 +349,6 @@ The pure status model. `nextState(prev, result, contractConfig, now, maxStalenes
 
 The failover logic behind the guard and `wasmward check`. Takes the primary and fallbacks as `GuardServer`s and returns `{ verifyNetwork(), lookup(contractIds, timeoutMs), usingFallback }`. With one server it behaves exactly like that server alone.
 
-### `createPoller`, `nextDelayMs`
+### `createPoller`, `nextDelayMs`, `MAX_TIMER_MS`
 
-The timer chain behind the guard. `createPoller({ intervalMs, maxStalenessMs, tick })` returns `{ start, stop }`; `nextDelayMs` computes the wait (interval, doubled per failing tick, capped at half of `maxStalenessMs`, plus up to 10 percent jitter).
+The timer chain behind the guard. `createPoller({ intervalMs, maxStalenessMs, tick })` returns `{ start, stop }`; `nextDelayMs` computes the wait (interval, doubled per failing tick, capped at half of `maxStalenessMs`, plus up to 10 percent jitter). `MAX_TIMER_MS` (about 24.8 days) is the longest a timer can wait; delays are never longer than that.

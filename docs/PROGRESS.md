@@ -293,3 +293,14 @@
 - Live testnet: a `mainnet` section whose RPC serves testnet was reported as an error (exit 2) while testnet checked normally; `add` without `--network` refused; `add --network testnet` edited only that network.
 
 **Status of the seed backlog:** all five items are done: browser example (D-017), multiple networks (D-019), `watch` (D-015), pairing guide (D-016), fallback RPC endpoints (D-018). No backlog issue has been opened.
+
+## Extra: stale announced on time, and timer limits
+
+**Date:** 2026-10-08
+
+**Built**
+- A timer in the guard that announces `supported -> stale` at the moment it happens; poll delays clamped to what a timer can wait; `pollIntervalMs` limited to one day. Closes a documented limitation and a latent tight-loop bug (D-020).
+
+**Results**
+- `pnpm test:coverage`: 514 tests pass (15 new), 99.7% lines; typecheck, lint and build clean.
+- Live testnet with real clocks: stale announced 10,007 ms after the last good check against a 10,000 ms limit.
