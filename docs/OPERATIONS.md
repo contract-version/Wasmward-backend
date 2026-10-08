@@ -52,6 +52,32 @@ Things to weigh:
 - **A fully failing lookup takes longer.** Each endpoint gets the usual timeout (the smaller of the poll interval and 10 seconds), one after another. Keep to one or two fallbacks. Freshness is dated from when a lookup started, so a slow failover never makes data look fresher than it is.
 - **Errors name endpoints by position** (`endpoint 0`, `endpoint 1`), not by URL, because RPC URLs often contain API keys. The text of the underlying error is passed through as the client gives it.
 
+## Several networks in one config file
+
+If the same app runs on testnet and mainnet, one file can describe both (see [API.md](API.md#several-networks-in-one-file) for the format). Each network has its own RPC, passphrase, settings, contracts and supported hashes, so a hash you trust on testnet is never silently trusted on mainnet.
+
+**In your app,** load the network you are running on:
+
+```js
+const config = await loadConfigFile('./wasmward.json', { network: process.env.STELLAR_NETWORK });
+```
+
+Choosing is explicit on purpose. There is no default network, so a missing or misspelled `STELLAR_NETWORK` is an error at startup, not a quiet fall back to mainnet.
+
+**In the command line:**
+
+| Command | Without `--network` | With `--network <name>` |
+|---|---|---|
+| `check` | Checks every network. Exit 2 if any could not be checked, else 1 if any is unsupported, else 0. A failure on one network does not hide the others. | Checks that network only, printed like a single-network config. |
+| `add` | Refuses, naming the networks, unless the file has exactly one. | Adds the hash to that network's contract only. |
+| `watch` | Refuses, naming the networks, unless the file has exactly one. | Watches that network; each line is prefixed `network/contract`. |
+
+With `check --json` and no `--network`, the output is `{ ok, exitCode, networks: { name: { ...report, exitCode } } }`. A network that could not be checked appears as `{ ok: false, error, exitCode: 2 }`.
+
+The network check is what keeps the sections honest: each network's RPC must report that network's passphrase, so a `mainnet` section whose RPC URL actually serves testnet is reported as an error rather than trusted.
+
+In a release pipeline, add the new hash to the right network first (`wasmward add vault new.wasm --network testnet --label v2`), prove it there, then repeat for mainnet before you upgrade that contract.
+
 ## Upgrading a contract safely
 
 The order matters. A contract that is upgraded before your apps know the new hash will have its writes blocked until they do.

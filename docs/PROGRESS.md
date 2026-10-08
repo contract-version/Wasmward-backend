@@ -280,3 +280,16 @@
 **Results**
 - `pnpm test:coverage`: 429 tests pass (60 new), 99.65% lines; typecheck, lint and build clean.
 - Live testnet: `check` with a dead primary and real testnet fallback exits 0 (`usingFallback: true`); both dead exits 2; the integration suite still passes.
+
+## Extra: several networks in one config file
+
+**Date:** 2026-10-08
+
+**Built**
+- A `networks` section in the config; `loadConfigDocument`, `loadConfigDocumentFile`, a `network` option on `loadConfig` and `loadConfigFile`; a `--network` option on `check`, `add` and `watch`, with `check` covering every network when none is named. The last seed-backlog item, built on request (D-019).
+
+**Results**
+- `pnpm test:coverage`: 499 tests pass (70 new), 99.7% lines; typecheck, lint and build clean.
+- Live testnet: a `mainnet` section whose RPC serves testnet was reported as an error (exit 2) while testnet checked normally; `add` without `--network` refused; `add --network testnet` edited only that network.
+
+**Status of the seed backlog:** all five items are done: browser example (D-017), multiple networks (D-019), `watch` (D-015), pairing guide (D-016), fallback RPC endpoints (D-018). No backlog issue has been opened.
