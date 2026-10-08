@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -280,6 +282,34 @@ describe('the built CLI', { timeout: 90_000 }, () => {
       await rm(fresh, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   });
+
+  it('check against an RPC that never answers gives up and exits, instead of hanging', async () => {
+    // Without a transport timeout the abandoned request keeps its connection open, and the process stays
+    // alive after it has already printed its answer. A deploy gate would then hang.
+    const silent = createServer(() => undefined);
+    await new Promise<void>((resolve) => silent.listen(0, '127.0.0.1', resolve));
+    try {
+      await writeFile(
+        join(dir, 'silent.json'),
+        JSON.stringify({
+          version: 1,
+          network: { rpcUrl: `http://127.0.0.1:${(silent.address() as AddressInfo).port}`, passphrase: PASSPHRASE },
+          pollIntervalMs: 5_000, // so a request may take up to 5 s
+          contracts: { vault: { contractId: VAULT, supported: [{ wasmHash: V1 }] } },
+        }),
+      );
+      const startedAt = Date.now();
+      const result = await runCli(['check', '--config', 'silent.json'], dir);
+      const seconds = (Date.now() - startedAt) / 1000;
+      expect(result.code).toBe(2);
+      expect(result.stderr).toContain('timed out after 5000ms');
+      // 5 s timeout, 1 s slack, plus starting Node and loading the SDK. Far short of "never".
+      expect(seconds).toBeLessThan(30);
+    } finally {
+      silent.closeAllConnections();
+      await new Promise<void>((resolve) => silent.close(() => resolve()));
+    }
+  }, 60_000);
 
   it('add updates the default config file and refuses a duplicate', async () => {
     await writeFile(join(dir, 'c.wasm'), new Uint8Array([7, 7, 7]));
