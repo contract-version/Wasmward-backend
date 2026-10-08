@@ -6,8 +6,8 @@ import type { ConfigDocument } from './config.js';
 import { ConfigError } from './errors.js';
 import type { GuardServer } from './guard.js';
 import { hashWasm } from './hash.js';
-import { buildHealth, type HealthReport } from './health.js';
-import { describeBlock, describeTimeLeft, EXPIRY_WARNING_LEDGERS, initialState, ledgersUntilExpiry, nextState } from './state.js';
+import { buildHealth, type ContractHealth, type HealthReport } from './health.js';
+import { describeBlock, describeTimeLeft, EXPIRY_WARNING_LEDGERS, initialState, ledgersUntilExpiry, nextState, SECONDS_PER_LEDGER } from './state.js';
 import type { ContractState, WasmwardConfig } from './types.js';
 
 // The Stellar SDK is large and slow to load. These modules pull it in, so they are imported only by
@@ -30,7 +30,7 @@ const USAGE = `Usage:
                [--wasm <file.wasm>] [--label <label>] [--rpc-url <url>] [--config <path>] [--json]
   wasmward hash <file.wasm> [--json]
   wasmward add <name> <file.wasm> --label <label> [--config <path>] [--network <name>] [--json]
-  wasmward check [--config <path>] [--network <name>] [--json]
+  wasmward check [--config <path>] [--network <name>] [--min-ttl-days <days>] [--json]
   wasmward watch [--config <path>] [--network <name>] [--json]
 
 Commands:
@@ -44,7 +44,7 @@ Commands:
 
 Exit codes:
   0  success; for check, every contract is supported; for watch, stopped by Ctrl+C
-  1  check: at least one contract is not supported
+  1  check: at least one contract is not supported, or (with --min-ttl-days) is too close to expiring
   2  invalid input, unreadable file, invalid config, or the network could not be checked
      (for watch, also if it cannot start)
 
@@ -56,6 +56,7 @@ Options:
   --rpc-url <url>  init: the RPC endpoint
   --passphrase <t> init: the network passphrase, when not using --preset
   --wasm <file>    init: take the first supported hash from this build instead of from the network
+  --min-ttl-days <n>  check: also fail (exit 1) if a supported contract has fewer than n days left
   --json           Machine-readable output
   -h, --help       Show this help
 `;
@@ -424,40 +425,53 @@ async function watchCommand(options: { config: string; network: string | undefin
 }
 
 /** How long the instance has left, and a nudge when it is short. Informational: it never changes a status. */
-function expiryNote(state: ContractState): string {
+function expiryNote(state: ContractState, minTtl: MinTtl | undefined): string {
   const remaining = ledgersUntilExpiry(state);
   if (remaining === undefined) return '';
+  if (isTooCloseToExpiry(state, minTtl) && minTtl !== undefined) {
+    return `  (expires in ${describeTimeLeft(remaining)}: under the ${minTtl.days}-day minimum)`;
+  }
   const soon = remaining < EXPIRY_WARNING_LEDGERS ? '; extend its lifetime soon' : '';
   return `  (expires in ${describeTimeLeft(remaining)}${soon})`;
 }
 
-function renderCheck(states: ContractState[], config: WasmwardConfig, now: number): string {
+function renderCheck(states: ContractState[], config: WasmwardConfig, now: number, minTtl: MinTtl | undefined): string {
   const width = Math.max(...states.map((state) => state.name.length));
   const lines = [`Network: ${config.network.passphrase}`];
   let supported = 0;
   for (const state of states) {
     const label = state.name.padEnd(width);
     if (state.status === 'supported') {
-      supported += 1;
+      if (!isTooCloseToExpiry(state, minTtl)) supported += 1;
       const matched = state.matchedLabel === undefined ? '' : ` (${state.matchedLabel})`;
-      lines.push(`${label}  supported${matched}  ${state.liveWasmHash ?? ''}${expiryNote(state)}`);
+      lines.push(`${label}  supported${matched}  ${state.liveWasmHash ?? ''}${expiryNote(state, minTtl)}`);
     } else {
       lines.push(`${label}  ${state.status}: ${describeBlock(state, now, config.maxStalenessMs)}`);
     }
   }
-  lines.push(`${supported} of ${states.length} contracts supported.`);
+  lines.push(
+    minTtl === undefined
+      ? `${supported} of ${states.length} contracts supported.`
+      : `${supported} of ${states.length} contracts supported with at least ${plural(minTtl.days, 'day')} left.`,
+  );
   return `${lines.join('\n')}\n`;
 }
+
+/** The health report, plus which contracts are too close to expiring when a minimum was asked for. */
+type CheckReport = Omit<HealthReport, 'contracts'> & {
+  minTtlDays?: number;
+  contracts: Record<string, ContractHealth & { belowMinTtl?: boolean }>;
+};
 
 interface CheckOutcome {
   exitCode: number;
   text: string;
-  report: HealthReport;
+  report: CheckReport;
   lookupFailed: boolean;
 }
 
 /** Checks one network. Throws {@link CliError} or {@link ConfigError} when it cannot even be reached. */
-async function checkNetwork(config: WasmwardConfig, io: CliIo): Promise<CheckOutcome> {
+async function checkNetwork(config: WasmwardConfig, io: CliIo, minTtl: MinTtl | undefined): Promise<CheckOutcome> {
   const { createEndpointSet } = await loadEndpointsModule();
   const servers = [
     await (io.createServer ?? defaultServer)(config),
@@ -492,30 +506,74 @@ async function checkNetwork(config: WasmwardConfig, io: CliIo): Promise<CheckOut
   // error (2) rather than as "not supported" (1), since the contract might well be fine.
   const lookupFailed = states.some((state) => state.lastError !== undefined);
   const allSupported = states.every((state) => state.status === 'supported');
+  const expiring = states.filter((state) => isTooCloseToExpiry(state, minTtl));
+  const health = buildHealth(states, {
+    passphrase: config.network.passphrase,
+    networkVerified: true,
+    usingFallback: endpoints.usingFallback,
+    now: startedAt,
+    maxStalenessMs: config.maxStalenessMs,
+  });
+
+  // With a minimum, the report says which contracts miss it, and `ok` agrees with the exit code.
+  const report: CheckReport = { ...health, contracts: { ...health.contracts } };
+  if (minTtl !== undefined) {
+    report.minTtlDays = minTtl.days;
+    report.ok = health.ok && expiring.length === 0;
+    for (const state of expiring) {
+      const entry = report.contracts[state.name];
+      if (entry !== undefined) report.contracts[state.name] = { ...entry, belowMinTtl: true };
+    }
+  }
+  const passes = allSupported && expiring.length === 0;
   return {
-    exitCode: lookupFailed ? EXIT_ERROR : allSupported ? EXIT_OK : EXIT_NOT_SUPPORTED,
-    text: renderCheck(states, config, startedAt),
-    report: buildHealth(states, {
-      passphrase: config.network.passphrase,
-      networkVerified: true,
-      usingFallback: endpoints.usingFallback,
-      now: startedAt,
-      maxStalenessMs: config.maxStalenessMs,
-    }),
+    exitCode: lookupFailed ? EXIT_ERROR : passes ? EXIT_OK : EXIT_NOT_SUPPORTED,
+    text: renderCheck(states, config, startedAt, minTtl),
+    report,
     lookupFailed,
   };
 }
 
+/** The smallest acceptable time left, from --min-ttl-days. */
+interface MinTtl {
+  days: number;
+  ledgers: number;
+}
+
+function parseMinTtl(value: string | undefined): MinTtl | undefined {
+  if (value === undefined) return undefined;
+  const days = Number(value);
+  if (value.trim() === '' || !Number.isFinite(days) || days <= 0 || days > 36_500) {
+    throw new CliError(`--min-ttl-days must be a positive number of days, for example 3. Got '${value}'.`);
+  }
+  return { days, ledgers: Math.ceil((days * 24 * 60 * 60) / SECONDS_PER_LEDGER) };
+}
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+/** A supported contract with less than the asked-for time left. Any other status already fails the check. */
+function isTooCloseToExpiry(state: ContractState, minTtl: MinTtl | undefined): boolean {
+  if (minTtl === undefined || state.status !== 'supported') return false;
+  const remaining = ledgersUntilExpiry(state);
+  return remaining !== undefined && remaining < minTtl.ledgers;
+}
+
 const LOOKUP_FAILED_NOTE = 'Some contracts could not be looked up; see the messages above.\n';
 
-async function checkCommand(options: { config: string; network: string | undefined; json: boolean }, io: CliIo): Promise<number> {
+async function checkCommand(
+  options: { config: string; network: string | undefined; minTtlDays: string | undefined; json: boolean },
+  io: CliIo,
+): Promise<number> {
+  const minTtl = parseMinTtl(options.minTtlDays);
   const { loadConfigDocumentFile } = await loadNodeModule();
   const document = await loadConfigDocumentFile(options.config);
 
   // One network, chosen by the file or by --network: errors end the command with exit code 2.
   if (document.kind === 'single' || options.network !== undefined) {
     const { config } = selectNetwork(document, options.network);
-    const outcome = await checkNetwork(config, io);
+    const outcome = await checkNetwork(config, io, minTtl);
     if (options.json) {
       io.stdout(jsonLine({ ...outcome.report, exitCode: outcome.exitCode }));
     } else {
@@ -529,7 +587,7 @@ async function checkCommand(options: { config: string; network: string | undefin
   const results: { name: string; outcome?: CheckOutcome; error?: string }[] = [];
   for (const [name, config] of Object.entries(document.networks)) {
     try {
-      results.push({ name, outcome: await checkNetwork(config, io) });
+      results.push({ name, outcome: await checkNetwork(config, io, minTtl) });
     } catch (error) {
       if (!(error instanceof CliError) && !(error instanceof ConfigError)) throw error;
       results.push({ name, error: error.message });
@@ -585,6 +643,9 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
   }
 
   try {
+    if (values['min-ttl-days'] !== undefined && command !== 'check') {
+      throw new CliError('--min-ttl-days only applies to check.');
+    }
     const config = values.config ?? DEFAULT_CONFIG_PATH;
     switch (command) {
       case 'hash':
@@ -607,7 +668,10 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         return await addCommand(rest, { config, network: values.network, label: values.label, json: values.json === true }, io);
       case 'check':
         if (rest.length > 0) throw new CliError('Usage: wasmward check [--config <path>] [--network <name>] [--json]');
-        return await checkCommand({ config, network: values.network, json: values.json === true }, io);
+        return await checkCommand(
+          { config, network: values.network, minTtlDays: values['min-ttl-days'], json: values.json === true },
+          io,
+        );
       case 'watch':
         if (rest.length > 0) throw new CliError('Usage: wasmward watch [--config <path>] [--network <name>] [--json]');
         return await watchCommand({ config, network: values.network, json: values.json === true }, io);
@@ -629,6 +693,7 @@ function parseCommandLine(argv: string[]) {
     options: {
       config: { type: 'string' },
       network: { type: 'string' },
+      'min-ttl-days': { type: 'string' },
       label: { type: 'string' },
       wasm: { type: 'string' },
       preset: { type: 'string' },
