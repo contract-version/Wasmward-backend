@@ -3,7 +3,7 @@ import { loadConfig } from './config.js';
 import { ConfigError, WriteBlockedError } from './errors.js';
 import { createEndpointSet, type GuardServer } from './endpoints.js';
 import { buildHealth, type HealthReport } from './health.js';
-import { createPoller } from './poller.js';
+import { createPoller, MAX_TIMER_MS } from './poller.js';
 import { describeBlock, effectiveStatus, initialState, isWritable, nextState } from './state.js';
 import type { ContractConfig, ContractState, LiveExecutable, Status, WasmwardConfigInput } from './types.js';
 
@@ -144,6 +144,44 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
     }
   }
 
+  let staleTimer: ReturnType<typeof setTimeout> | undefined;
+  /** True from a successful start until stop(). Only then are time-driven notifications sent. */
+  let notifying = false;
+
+  function clearStaleTimer(): void {
+    if (staleTimer !== undefined) clearTimeout(staleTimer);
+    staleTimer = undefined;
+  }
+
+  /**
+   * A supported contract turns stale just by time passing, with no check needed to notice. Arm one timer
+   * for the soonest moment that happens, so subscribers hear about it on time instead of at the next poll.
+   */
+  function scheduleStaleCheck(): void {
+    clearStaleTimer();
+    if (!notifying) return;
+    const at = now();
+    let soonest = Number.POSITIVE_INFINITY;
+    for (const state of states.values()) {
+      if (state.status !== 'supported' || state.lastSuccessAt === undefined) continue;
+      // A contract is stale once its last success is more than maxStalenessMs old.
+      soonest = Math.min(soonest, state.lastSuccessAt + maxStalenessMs + 1 - at);
+    }
+    if (!Number.isFinite(soonest)) return;
+    staleTimer = setTimeout(() => {
+      staleTimer = undefined;
+      publish(contracts.keys());
+    }, Math.min(Math.max(soonest, 0), MAX_TIMER_MS));
+    // Never keep a process alive just to announce a status change.
+    if (typeof staleTimer === 'object' && typeof staleTimer.unref === 'function') staleTimer.unref();
+  }
+
+  /** Tells subscribers about any status changes, then arms the timer for the next one. */
+  function publish(names: Iterable<string>): void {
+    emit(collectChanges(names));
+    scheduleStaleCheck();
+  }
+
   async function tick(): Promise<boolean> {
     const startedAt = now();
     const ids = [...contracts.values()].map((contract) => contract.contractId);
@@ -154,7 +192,7 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
       if (result.kind !== 'error') everyLookupFailed = false;
       apply(name, result, startedAt);
     }
-    emit(collectChanges(contracts.keys()));
+    publish(contracts.keys());
     return everyLookupFailed;
   }
 
@@ -185,7 +223,7 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
       (await endpoints.lookup([contract.contractId], lookupTimeoutMs)).get(contract.contractId) ??
       ({ kind: 'error', message: 'no result returned' } as const);
     apply(name, result, startedAt);
-    emit(collectChanges([name]));
+    publish([name]);
     if (result.kind === 'error') {
       throw blocked(name, `the live code could not be checked just now (${result.message})`);
     }
@@ -205,6 +243,7 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
         }
         // A stop() that arrived while the network was being checked cancels this start.
         if (epoch !== stopEpoch) return;
+        notifying = true;
         await poller.start();
       })();
       starting = attempt;
@@ -217,6 +256,8 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
 
     stop(): Promise<void> {
       stopEpoch += 1;
+      notifying = false;
+      clearStaleTimer();
       starting = undefined;
       return poller.stop();
     },
