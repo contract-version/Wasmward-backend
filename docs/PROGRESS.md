@@ -344,3 +344,11 @@
 - The real-process test hangs without the fix (60 s limit hit) and passes in about 6 s with it.
 
 **Still open:** the browser example's build selector is not serialised against rapid changes (D-022).
+
+## Extra: browser example selector race
+
+**Date:** 2026-10-08
+
+**Fixed** (D-024, in `Wasmward-frontend`): rapid changes of the build selector no longer leave extra guards polling in the background. Reproduced and verified in a real browser by counting RPC requests (9 in 30 s before, 3 after).
+
+**Open items:** none in the code. What remains is yours: claim the `@wasmward` npm scope, add the `NPM_TOKEN` secret, set the changelog date, push the `v0.1.0` tag, and decide whether to open the seed-backlog issues.
