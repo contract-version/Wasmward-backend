@@ -182,6 +182,57 @@ describe('the built CLI', { timeout: 90_000 }, () => {
     expect(result.stderr).toContain('all 2 RPC endpoints failed');
   });
 
+  describe('with a config that has several networks', () => {
+    const MAINNET = 'Public Global Stellar Network ; September 2015';
+
+    async function writeMulti(name: string): Promise<void> {
+      // Both sections use the one fake RPC, which serves the test network. The "mainnet" section expects the
+      // public network, so it must be caught rather than trusted.
+      const contracts = { vault: { contractId: VAULT, supported: [{ wasmHash: V1, label: 'v1.0.0' }] } };
+      await writeFile(
+        join(dir, name),
+        JSON.stringify({
+          version: 1,
+          networks: {
+            testnet: { network: { rpcUrl: rpc.url, passphrase: PASSPHRASE }, contracts },
+            mainnet: { network: { rpcUrl: rpc.url, passphrase: MAINNET }, contracts },
+          },
+        }),
+      );
+    }
+
+    it('check catches a network whose RPC serves a different one, and exits 2', async () => {
+      await writeMulti('multi.json');
+      const result = await runCli(['check', '--json', '--config', 'multi.json'], dir);
+      expect(result.code).toBe(2);
+      const json = JSON.parse(result.stdout);
+      expect(json.networks.testnet).toMatchObject({ ok: true, exitCode: 0 });
+      expect(json.networks.mainnet).toMatchObject({ ok: false, exitCode: 2 });
+      expect(json.networks.mainnet.error).toContain(`config expects "${MAINNET}"`);
+    });
+
+    it('check --network passes for the network that matches', async () => {
+      await writeMulti('multi-ok.json');
+      const result = await runCli(['check', '--network', 'testnet', '--config', 'multi-ok.json'], dir);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain('vault  supported (v1.0.0)');
+    });
+
+    it('add refuses to guess the network, then edits only the one you name', async () => {
+      await writeMulti('multi-add.json');
+      await writeFile(join(dir, 'd.wasm'), new Uint8Array([4, 4, 4]));
+      const guess = await runCli(['add', 'vault', 'd.wasm', '--label', 'v9', '--config', 'multi-add.json'], dir);
+      expect(guess.code).toBe(2);
+      expect(guess.stderr).toContain('choose one with --network');
+
+      const named = await runCli(['add', 'vault', 'd.wasm', '--network', 'mainnet', '--label', 'v9', '--config', 'multi-add.json'], dir);
+      expect(named.code).toBe(0);
+      const saved = JSON.parse(await readFile(join(dir, 'multi-add.json'), 'utf8'));
+      expect(saved.networks.mainnet.contracts.vault.supported).toHaveLength(2);
+      expect(saved.networks.testnet.contracts.vault.supported).toHaveLength(1);
+    });
+  });
+
   it('add updates the default config file and refuses a duplicate', async () => {
     await writeFile(join(dir, 'c.wasm'), new Uint8Array([7, 7, 7]));
     const first = await runCli(['add', 'vault', 'c.wasm', '--label', 'v3'], dir);
