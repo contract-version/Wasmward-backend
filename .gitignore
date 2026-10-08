@@ -8,3 +8,4 @@ fixtures/testnet.json
 .DS_Store
 Wasmward-contract/
 readme-example.tmp.mjs
+.consumer-*/
