@@ -37,6 +37,8 @@ The order matters. A contract that is upgraded before your apps know the new has
 4. **Upgrade the contract.** Apps running the new release carry on; apps still on the old release are blocked, which is the point.
 5. **Optionally remove the old hash** in a later release once nothing needs it.
 
+To check compatibility before you add the hash, pair this with soroban-upgrade-safeguard; see [PAIRING.md](PAIRING.md) for the full workflow, including a GitHub Actions example.
+
 To confirm step 3 before step 4, run `npx wasmward check` against the config in the build you are about to release. It exits 0 only if the live contract is on code that build supports. After step 4, a build that did not add the new hash will exit 1.
 
 ### In a deploy pipeline

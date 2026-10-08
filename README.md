@@ -2,7 +2,7 @@
 
 A runtime guard for Soroban contract upgrades. A contract can be upgraded in place, so an app that still encodes calls for the old interface may see its writes fail, or worse, succeed with the wrong meaning. Wasmward checks which Wasm code a contract is running on the network, compares its hash with the hashes your app supports, and blocks writes whenever the code is unknown, cannot be verified, or the check is stale. It is small enough to run in a backend or a browser, and it fails closed.
 
-Tools such as [soroban-upgrade-safeguard](https://github.com/ShippedLabs/soroban-upgrade-safeguard) compare builds *before* an upgrade is deployed. Wasmward is the other half: it runs in your app *after* the upgrade, whoever made it.
+Tools such as [soroban-upgrade-safeguard](https://github.com/ShippedLabs/soroban-upgrade-safeguard) compare builds *before* an upgrade is deployed. Wasmward is the other half: it runs in your app *after* the upgrade, whoever made it. [They work well together](docs/PAIRING.md).
 
 > **Status:** version 0.1.0, not yet published to npm. Until it is, install from a clone of this repository.
 
@@ -99,6 +99,7 @@ Only the `supported` status allows writes. See [docs/API.md](docs/API.md) for ev
 
 - [API reference](docs/API.md)
 - [Operations guide](docs/OPERATIONS.md): recommended settings, upgrade order, health endpoints, limits
+- [Pairing with soroban-upgrade-safeguard](docs/PAIRING.md): a release workflow that checks compatibility first and records the decision in your app
 - [Decisions](docs/DECISIONS.md) and [progress log](docs/PROGRESS.md)
 - [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), [Changelog](CHANGELOG.md)
 
