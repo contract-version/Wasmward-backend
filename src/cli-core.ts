@@ -14,6 +14,7 @@ import type { ContractState, WasmwardConfig } from './types.js';
 const loadConfigModule = () => import('./config.js');
 const loadNodeModule = () => import('./node.js');
 const loadFetchModule = () => import('./fetch.js');
+const loadGuardModule = () => import('./guard.js');
 
 /** Exit codes, as documented for deploy gates. */
 export const EXIT_OK = 0;
@@ -27,16 +28,19 @@ const USAGE = `Usage:
   wasmward hash <file.wasm> [--json]
   wasmward add <name> <file.wasm> --label <label> [--config <path>] [--json]
   wasmward check [--config <path>] [--json]
+  wasmward watch [--config <path>] [--json]
 
 Commands:
   hash    Print the lowercase SHA-256 hash of a Wasm file.
   add     Add a Wasm file's hash to a contract's supported list in the config.
   check   Look up the live code of every configured contract and report its status.
+  watch   Keep checking and print each status change until interrupted (Ctrl+C).
 
 Exit codes:
-  0  success; for check, every contract is supported
+  0  success; for check, every contract is supported; for watch, stopped by Ctrl+C
   1  check: at least one contract is not supported
   2  invalid input, unreadable file, invalid config, or the network could not be checked
+     (for watch, also if it cannot start)
 
 Options:
   --config <path>  Config file (default ${DEFAULT_CONFIG_PATH})
@@ -52,6 +56,8 @@ export interface CliIo {
   createServer?: (config: WasmwardConfig) => GuardServer | Promise<GuardServer>;
   /** Clock in milliseconds since the Unix epoch. Defaults to `Date.now`. */
   now?: () => number;
+  /** Ends `watch` when aborted. The entry point aborts it on Ctrl+C or SIGTERM. */
+  signal?: AbortSignal;
 }
 
 /** Thrown inside a command to end it with a message and an exit code. */
@@ -163,6 +169,53 @@ async function addCommand(
   return EXIT_OK;
 }
 
+async function watchCommand(options: { config: string; json: boolean }, io: CliIo): Promise<number> {
+  const signal = io.signal;
+  if (signal === undefined) throw new CliError('Internal error: watch needs a signal to know when to stop.');
+  const { loadConfigFile } = await loadNodeModule();
+  const { createVersionGuard } = await loadGuardModule();
+  const config = await loadConfigFile(options.config);
+  const now = io.now ?? Date.now;
+  const server = await (io.createServer ?? defaultServer)(config);
+  const guard = createVersionGuard(config, { server, now });
+
+  const report = (state: ContractState, from: string): void => {
+    const at = new Date(now()).toISOString();
+    const reason = state.status === 'supported' ? undefined : describeBlock(state, now(), config.maxStalenessMs);
+    if (options.json) {
+      const line: Record<string, unknown> = { time: at, contract: state.name, from, to: state.status };
+      if (state.liveWasmHash !== undefined) line['liveWasmHash'] = state.liveWasmHash;
+      if (state.matchedLabel !== undefined) line['matchedLabel'] = state.matchedLabel;
+      if (reason !== undefined) line['reason'] = reason;
+      io.stdout(jsonLine(line));
+      return;
+    }
+    const detail =
+      reason ?? `${state.liveWasmHash ?? ''}${state.matchedLabel === undefined ? '' : ` (${state.matchedLabel})`}`;
+    io.stdout(`${at} ${state.name}: ${from} -> ${state.status}  ${detail}
+`);
+  };
+
+  guard.subscribe((change) => report(change.state, change.from));
+  try {
+    await guard.start();
+  } catch (error) {
+    throw new CliError(messageOf(error));
+  }
+  // A contract whose first lookup failed has not changed status, so it has not been reported yet.
+  for (const state of Object.values(guard.status())) {
+    if (state.status === 'pending') report(state, 'pending');
+  }
+  if (!options.json) io.stderr(`Watching ${Object.keys(config.contracts).length} contract(s). Press Ctrl+C to stop.
+`);
+
+  if (!signal.aborted) {
+    await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
+  }
+  await guard.stop();
+  return EXIT_OK;
+}
+
 function renderCheck(states: ContractState[], config: WasmwardConfig, now: number): string {
   const width = Math.max(...states.map((state) => state.name.length));
   const lines = [`Network: ${config.network.passphrase}`];
@@ -271,6 +324,9 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
       case 'check':
         if (rest.length > 0) throw new CliError('Usage: wasmward check [--config <path>] [--json]');
         return await checkCommand({ config, json: values.json === true }, io);
+      case 'watch':
+        if (rest.length > 0) throw new CliError('Usage: wasmward watch [--config <path>] [--json]');
+        return await watchCommand({ config, json: values.json === true }, io);
       default:
         throw new CliError(`Unknown command '${command}'.\n\n${USAGE.trimEnd()}`);
     }
