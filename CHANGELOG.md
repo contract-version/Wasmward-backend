@@ -20,6 +20,7 @@ First release. Set the date when the version is tagged.
 - `wasmward watch`: keeps checking and prints each status change, as text or JSON lines, until interrupted with Ctrl+C or SIGTERM.
 - Several networks in one config file: a `networks` section whose entries have the single-network shape. Choosing a network is always explicit (`loadConfig(file, { network })`, `--network <name>`), and `wasmward check` without `--network` checks every network. Adds `loadConfigDocument`, `loadConfigDocumentFile` and the `ConfigDocument` type.
 - `subscribe` now announces `supported -> stale` the moment it happens, using a timer, instead of at the next poll. `pollIntervalMs` is limited to one day, and no poll or staleness delay can exceed what a timer can wait.
+- A GitHub Action (`uses: contract-version/Wasmward-backend@<ref>`) that runs `wasmward check` in a workflow, with `config`, `network` and `min-ttl-days` inputs and a job summary.
 - `wasmward check --min-ttl-days <n>`: an opt-in gate that fails (exit 1) when a supported contract has fewer than n days left; the JSON marks the contracts and the minimum.
 - `wasmward check` shows how long each contract instance has left (and suggests extending when under about a week); the state and health report carry `liveUntilLedger`, `latestLedger` and `ledgersUntilExpiry`. Informational only.
 - `docs/THREAT-MODEL.md`: the guarantee, what it defends against, what it trusts, and what it cannot do.

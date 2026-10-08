@@ -84,6 +84,26 @@ One file can describe several networks (for example testnet and mainnet); pass `
 
 `watch` keeps checking and prints a line whenever a contract's status changes, which is handy while rehearsing an upgrade. Add `--json` for machine-readable output (one JSON object per line for `watch`).
 
+## In GitHub Actions
+
+The repository is also a GitHub Action that runs `wasmward check` and fails the workflow if a contract runs code your config does not support, cannot be checked, or is about to expire:
+
+```yaml
+- uses: actions/checkout@v4
+- uses: contract-version/Wasmward-backend@main
+  with:
+    config: wasmward.json   # default
+    min-ttl-days: 3         # optional: also fail if a contract has under 3 days left
+```
+
+| Input | Default | |
+|---|---|---|
+| `config` | `wasmward.json` | Path to the config, relative to the workspace. |
+| `network` | empty | For a config with a `networks` section, the one network to check. Empty checks every network. |
+| `min-ttl-days` | empty | Fail if a supported contract has fewer days left than this. Empty only reports the time left. |
+
+The step's result is the command's exit code (0 all supported, 1 something unsupported or too close to expiring, 2 could not be checked) and the output is also written to the job summary. Until Wasmward is on npm the action builds it from this repository, which takes about a minute, so use a commit or tag in place of `@main` once you want a version that cannot change under you. It is how the [test contract](https://github.com/contract-version/Wasmward-contract) checks itself every week, and how the [browser example](https://github.com/contract-version/Wasmward-frontend) checks the contract it depends on.
+
 ## API overview
 
 | | |
