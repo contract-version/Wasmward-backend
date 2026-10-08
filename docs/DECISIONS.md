@@ -169,3 +169,13 @@ Every deviation from the specification, and every choice the specification left 
 - **`npx` from the tarball.** The CI test job packs the package and runs `npx --package ./wasmward-core-*.tgz wasmward hash README.md` and `--help` on Node 20 and 22. Locally the same tarball was extracted and run with the installed dependencies linked, including a command that loads the lazy chunks; a real `npx` install was not run locally because the npm registry is too slow on this machine.
 - **Security policy.** It names GitHub Security Advisories as the private channel and lists which reports matter most, but gives no response-time promise; that is a commitment for the maintainers to make.
 - **The seed backlog is not opened.** The spec lists five issues to open after the MVP. Opening them publishes content on a public repository, so it waits for the project owner's go-ahead.
+
+## D-015: `wasmward watch` (seed-backlog item, built on request)
+
+- **Date:** 2026-10-08
+- **Built although the spec lists it as a later backlog item.** The spec says not to implement the seed backlog "as part of this build". The project owner asked for more of the project to be built, and this was the smallest self-contained item, so it was added as part of 0.1.0. The other four backlog items are still not built, and none of the issues has been opened.
+- **It is the guard, printed.** `watch` runs `createVersionGuard` with the config, so it verifies the network passphrase first and uses the same status model, poller and block reasons as an application would. It adds no checking logic of its own.
+- **What is printed.** One line per status change with an ISO timestamp, the contract name, the transition, and either the live hash and label or the reason it is blocked. A contract whose first lookup failed never changes status, so it is reported once as `pending -> pending` with the error. `Watching N contract(s)` and the Ctrl+C hint go to stderr, so stdout holds only changes. With `--json` each line is one JSON object (`time`, `contract`, `from`, `to`, and `liveWasmHash`, `matchedLabel` or `reason` when they apply) and nothing is written to stderr.
+- **Stopping.** The entry point aborts an `AbortController` on SIGINT or SIGTERM. `main` takes it as `io.signal`, stops the guard (waiting for a check in progress), and exits 0. Calling `watch` without a signal is an internal error rather than an endless loop.
+- **Exit codes.** 0 after Ctrl+C. 2 if it cannot start: bad config, wrong network, or an unreachable RPC (the same rules as `check`). It does not exit non-zero because a contract became unsupported; that is what it is there to show.
+- **Lazy loading.** The guard module is imported only by `watch`, so `hash` stays fast (D-012).

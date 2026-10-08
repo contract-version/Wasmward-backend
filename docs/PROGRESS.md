@@ -234,3 +234,14 @@
 - The `integration` job installed the Stellar CLI 27.0.0 Linux binary, generated a fresh testnet identity, deployed a new fixture and ran the tests on Ubuntu.
 - The 4 testnet upgrade tests passed: the guard noticed the upgrade 3.8 s after it was confirmed with a 5 s poll interval. The runner's own hashes (v1 `bfa19d1b6aef2f8fec117943afe55ab52b39cae6ac80d8fa949b2cd91230887c`, v2 `b588049d12b3cae5b412d025986c10fa945c6696ff305392a44b3a3f235a340d`) matched what it uploaded. They differ from the Windows build hashes above because the same source builds to different Wasm on different toolchains; see `docs/OPERATIONS.md`.
 - The 2 README tests failed because the job did not run `pnpm build`. The job now builds before testing.
+
+## Extra: `wasmward watch`
+
+**Date:** 2026-10-08
+
+**Built**
+- `wasmward watch [--config path] [--json]` in `src/cli-core.ts`, with SIGINT and SIGTERM handled in `src/cli.ts`. A seed-backlog item built on request (D-015).
+
+**Results**
+- `test/unit/cli-watch.test.ts`: 12 tests covering transitions, quiet polls, JSON lines, a failing first lookup and its recovery, a missing contract, network mismatch and unreachable RPC, a missing config, an already-aborted signal, extra arguments, a missing signal, and a clean stop with no timers left.
+- Run against the live testnet fixture: printed `pending -> supported` with the v1 hash and label, and exited 0 when stopped by SIGTERM.

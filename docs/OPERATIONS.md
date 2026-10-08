@@ -49,6 +49,16 @@ npx wasmward check --config wasmward.json
 - Exit `1`: at least one contract runs unsupported code (or is missing, archived or a Stellar Asset Contract). Do not release.
 - Exit `2`: the config is invalid, or the network could not be checked. Treat as a failure.
 
+### Watching an upgrade happen
+
+While rehearsing an upgrade on testnet, or when you want a quick look at a live contract:
+
+```bash
+npx wasmward watch --config wasmward.json
+```
+
+It prints each contract's first status and every change after that, with a timestamp and the reason a contract is blocked, until you press Ctrl+C. It uses the config's `pollIntervalMs`. Like the guard, it only reports a change to `stale` when a check completes.
+
 ## Limits
 
 Be clear about what a guard can and cannot do.
