@@ -20,6 +20,8 @@ Wasmward is a guard that blocks writes to contracts running unknown code. The re
 
 Weaknesses that follow from a documented limit are not vulnerabilities, such as a write sent between an upgrade and the next check (see [docs/OPERATIONS.md](docs/OPERATIONS.md)), or a compromised RPC endpoint that you chose to trust.
 
+The full list of what Wasmward does and does not defend against, and what it trusts, is in the [threat model](docs/THREAT-MODEL.md). A report that contradicts a claim made there is exactly what we want to hear about.
+
 ## Supported versions
 
 | Version | Supported |

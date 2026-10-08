@@ -105,6 +105,7 @@ Only the `supported` status allows writes. See [docs/API.md](docs/API.md) for ev
 
 - [API reference](docs/API.md)
 - [Operations guide](docs/OPERATIONS.md): recommended settings, upgrade order, health endpoints, limits
+- [Threat model](docs/THREAT-MODEL.md): what it defends against, what it trusts, and what it cannot do
 - [Pairing with soroban-upgrade-safeguard](docs/PAIRING.md): a release workflow that checks compatibility first and records the decision in your app
 - [Decisions](docs/DECISIONS.md) and [progress log](docs/PROGRESS.md)
 - [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), [Changelog](CHANGELOG.md)

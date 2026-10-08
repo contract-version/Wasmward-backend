@@ -136,6 +136,8 @@ It prints each contract's first status and every change after that, with a times
 
 ## Limits
 
+The [threat model](THREAT-MODEL.md) sets these out in full, including what the guard trusts. In short:
+
 Be clear about what a guard can and cannot do.
 
 - **There is always a window.** An upgrade takes effect in the ledger where its transaction is applied. The guard learns of it at its next check, up to one poll interval later (plus jitter of up to 10 percent). A write sent inside that window can reach the new code.
