@@ -408,3 +408,16 @@
 **Results**
 - Backend: all tests pass (8 new); typecheck, lint and build clean.
 - GitHub: the action ran successfully in both other repositories against live testnet, and the fixture health workflow still passes.
+
+## Extra: the Wasm code entry's lifetime (all three repositories)
+
+**Date:** 2026-10-09
+
+**Backend** (D-030): the code entries of the builds in use are read after the instance lookup; an expired or missing one makes the contract `archived` and says so; `ledgersUntilExpiry` is the sooner of the two, `expiringEntry` says which. The threat model's one admitted gap is closed.
+**Contract:** `scripts/check-lifetimes.mjs` checks every supported build's code, including the upgrade target v2, in the weekly health workflow; its logic is tested offline in CI.
+**Frontend:** the "Time left" row names the Wasm code when it is the one running out; the logic is tested (`pnpm test`) and the tests run in CI.
+
+**Results**
+- Backend: 660 tests pass (34 new), 99.64% lines; typecheck, lint and build clean; the new tests fail without the change.
+- Live: `wasmward check`, the browser demo and the contract's health workflow all report the real fixture's code (about 28 days left); the real code-entry response from testnet is now part of the replay tests.
+- GitHub: CI green in all three repositories.
