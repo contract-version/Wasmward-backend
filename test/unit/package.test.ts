@@ -18,7 +18,7 @@ const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.ur
 
 /** These tests inspect the build output, so run `pnpm build` first. */
 describe('published package', () => {
-  it('contains only dist, README.md, LICENSE and package.json', async () => {
+  it('contains only dist, the JSON Schema, README.md, LICENSE and package.json', async () => {
     const { stdout } = await run(npm, ['pack', '--dry-run', '--json', '--ignore-scripts'], {
       shell: process.platform === 'win32',
     });
@@ -27,10 +27,10 @@ describe('published package', () => {
 
     expect(paths.length).toBeGreaterThan(5);
     const unexpected = paths.filter(
-      (path) => !path.startsWith('dist/') && !['README.md', 'LICENSE', 'package.json'].includes(path),
+      (path) => !path.startsWith('dist/') && !['README.md', 'LICENSE', 'package.json', 'schema/wasmward.schema.json'].includes(path),
     );
     expect(unexpected).toEqual([]);
-    for (const required of ['README.md', 'LICENSE', 'package.json', 'dist/index.js', 'dist/cli.js']) {
+    for (const required of ['README.md', 'LICENSE', 'package.json', 'schema/wasmward.schema.json', 'dist/index.js', 'dist/cli.js']) {
       expect(paths, `${required} is missing`).toContain(required);
     }
   }, 120_000);
@@ -57,5 +57,11 @@ describe('published package', () => {
     expect(pkg.name).toBe('@wasmward/core');
     expect(pkg.version).toBe('0.1.0');
     expect(Object.keys(pkg.exports)).toEqual(expect.arrayContaining(['.', './node']));
+  });
+
+  it('exports the JSON Schema, and its $id names the file that is published', () => {
+    expect(pkg.exports['./schema.json']).toBe('./schema/wasmward.schema.json');
+    const schema = JSON.parse(readFileSync(new URL('../../schema/wasmward.schema.json', import.meta.url), 'utf8')) as { $id: string };
+    expect(schema.$id).toBe('https://github.com/contract-version/Wasmward-backend/blob/main/schema/wasmward.schema.json');
   });
 });

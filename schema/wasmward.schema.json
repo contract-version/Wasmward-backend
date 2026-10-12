@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/contract-version/Wasmward-backend/blob/main/schema/wasmward.schema.json",
+  "title": "Wasmward config",
+  "description": "A wasmward.json file. This schema lets an editor complete and check the shape. wasmward validate checks the rest: contract ID checksums, duplicate hashes and duplicate RPC URLs, and maxStalenessMs against pollIntervalMs.",
+  "type": "object",
+  "oneOf": [
+    {
+      "title": "One network",
+      "required": ["version", "network", "contracts"],
+      "additionalProperties": false,
+      "properties": {
+        "$schema": { "type": "string" },
+        "version": { "const": 1, "description": "The config format. Always 1." },
+        "network": { "$ref": "#/definitions/network" },
+        "pollIntervalMs": { "$ref": "#/definitions/pollIntervalMs" },
+        "maxStalenessMs": { "$ref": "#/definitions/maxStalenessMs" },
+        "contracts": { "$ref": "#/definitions/contracts" }
+      }
+    },
+    {
+      "title": "Several networks",
+      "required": ["version", "networks"],
+      "additionalProperties": false,
+      "properties": {
+        "$schema": { "type": "string" },
+        "version": { "const": 1, "description": "The config format. Always 1." },
+        "networks": {
+          "type": "object",
+          "description": "Each network is shaped like a single-network file, without version. Choose one with --network.",
+          "minProperties": 1,
+          "propertyNames": { "pattern": "^[a-z0-9][a-z0-9-_]{0,63}$" },
+          "additionalProperties": {
+            "type": "object",
+            "required": ["network", "contracts"],
+            "additionalProperties": false,
+            "properties": {
+              "network": { "$ref": "#/definitions/network" },
+              "pollIntervalMs": { "$ref": "#/definitions/pollIntervalMs" },
+              "maxStalenessMs": { "$ref": "#/definitions/maxStalenessMs" },
+              "contracts": { "$ref": "#/definitions/contracts" }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "rpcUrl": {
+      "type": "string",
+      "description": "An https URL. Plain http is allowed only for localhost or 127.0.0.1.",
+      "pattern": "^(https://|http://(localhost|127\\.0\\.0\\.1)([:/?#]|$))"
+    },
+    "network": {
+      "type": "object",
+      "required": ["rpcUrl", "passphrase"],
+      "additionalProperties": false,
+      "properties": {
+        "rpcUrl": { "$ref": "#/definitions/rpcUrl" },
+        "fallbackRpcUrls": {
+          "type": "array",
+          "description": "Spare endpoints, tried in order when the primary cannot answer. Each must report the same passphrase.",
+          "maxItems": 4,
+          "items": { "$ref": "#/definitions/rpcUrl" }
+        },
+        "passphrase": { "type": "string", "minLength": 1, "description": "The network passphrase the RPC must report." }
+      }
+    },
+    "pollIntervalMs": {
+      "type": "integer",
+      "description": "How often to look up the live code. Default 30000.",
+      "minimum": 5000,
+      "maximum": 86400000
+    },
+    "maxStalenessMs": {
+      "type": "integer",
+      "description": "How old a successful check may be before writes are blocked. At least twice pollIntervalMs. Default four times pollIntervalMs.",
+      "minimum": 1
+    },
+    "contracts": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[a-z0-9][a-z0-9-_]{0,63}$" },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["contractId", "supported"],
+        "additionalProperties": false,
+        "properties": {
+          "contractId": { "type": "string", "description": "The contract's address, starting with C.", "pattern": "^C[A-Z2-7]{55}$" },
+          "supported": {
+            "type": "array",
+            "description": "The Wasm builds this app can talk to. Only these allow writes.",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["wasmHash"],
+              "additionalProperties": false,
+              "properties": {
+                "wasmHash": { "type": "string", "description": "The SHA-256 of the Wasm, 64 hex characters (wasmward hash <file>).", "pattern": "^[0-9a-fA-F]{64}$" },
+                "label": { "type": "string", "minLength": 1, "maxLength": 64, "description": "A name for the build, such as v1.2.0." }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -181,7 +182,13 @@ const EXPECTED_FUNCTIONS = ['function', 'function', 'function', 'function', 'fun
 describe('the packed package, installed into a fresh project', { timeout: 120_000 }, () => {
   it('holds only what was meant to be published', async () => {
     const installed = join(project, 'node_modules', '@wasmward', 'core');
-    expect((await readdir(installed)).sort()).toEqual(['LICENSE', 'README.md', 'dist', 'package.json']);
+    expect((await readdir(installed)).sort()).toEqual(['LICENSE', 'README.md', 'dist', 'package.json', 'schema']);
+  });
+
+  it('lets an installed project find the JSON Schema by its package name', async () => {
+    const resolved = createRequire(join(project, 'resolve.cjs')).resolve('@wasmward/core/schema.json');
+    const schema = JSON.parse(await readFile(resolved, 'utf8')) as { title: string };
+    expect(schema.title).toBe('Wasmward config');
   });
 
   it('works with import, and its defaults and a hash are right', async () => {
