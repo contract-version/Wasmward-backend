@@ -30,6 +30,7 @@ const USAGE = `Usage:
                [--wasm <file.wasm>] [--label <label>] [--rpc-url <url>] [--config <path>] [--json]
   wasmward hash <file.wasm> [--json]
   wasmward add <name> <file.wasm> --label <label> [--config <path>] [--network <name>] [--json]
+  wasmward validate [--config <path>] [--json]
   wasmward check [--config <path>] [--network <name>] [--min-ttl-days <days>] [--json]
   wasmward watch [--config <path>] [--network <name>] [--json]
 
@@ -38,6 +39,7 @@ Commands:
           or, failing that, the code that is live on the network right now.
   hash    Print the lowercase SHA-256 hash of a Wasm file.
   add     Add a Wasm file's hash to a contract's supported list in the config.
+  validate  Check the config file alone, without contacting any network. Exit 0 if it is valid.
   check   Look up the live code of every configured contract and report its status.
           With a multi-network config and no --network, every network is checked.
   watch   Keep checking and print each status change until interrupted (Ctrl+C).
@@ -570,6 +572,35 @@ function isTooCloseToExpiry(state: ContractState, minTtl: MinTtl | undefined): b
 
 const LOOKUP_FAILED_NOTE = 'Some contracts could not be looked up; see the messages above.\n';
 
+/** Reads the config and says what is in it, without any network access. Exit 0 if it is valid, 2 if not. */
+async function validateCommand(options: { config: string; json: boolean }, io: CliIo): Promise<number> {
+  const { loadConfigDocumentFile } = await loadNodeModule();
+  const document = await loadConfigDocumentFile(options.config);
+  const networks = document.kind === 'single' ? [{ name: undefined, config: document.config }] : Object.entries(document.networks).map(([name, config]) => ({ name, config }));
+  const summary = networks.map(({ name, config }) => ({
+    ...(name === undefined ? {} : { name }),
+    rpcUrl: config.network.rpcUrl,
+    contracts: Object.entries(config.contracts).map(([contract, { contractId, supported }]) => ({
+      name: contract,
+      contractId,
+      supported: supported.length,
+    })),
+  }));
+  if (options.json) {
+    io.stdout(jsonLine({ ok: true, config: options.config, networks: summary }));
+    return EXIT_OK;
+  }
+  const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? '' : 's'}`;
+  const contractCount = summary.reduce((total, network) => total + network.contracts.length, 0);
+  const lines = [`${options.config} is valid: ${plural(summary.length, 'network')}, ${plural(contractCount, 'contract')}.`];
+  for (const network of summary) {
+    if (network.name !== undefined) lines.push(`${network.name}:`);
+    for (const contract of network.contracts) lines.push(`  ${contract.name}  ${plural(contract.supported, 'supported build')}`);
+  }
+  io.stdout(`${lines.join('\n')}\n`);
+  return EXIT_OK;
+}
+
 async function checkCommand(
   options: { config: string; network: string | undefined; minTtlDays: string | undefined; json: boolean },
   io: CliIo,
@@ -680,6 +711,9 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         );
       case 'add':
         return await addCommand(rest, { config, network: values.network, label: values.label, json: values.json === true }, io);
+      case 'validate':
+        if (rest.length > 0) throw new CliError('Usage: wasmward validate [--config <path>] [--json]');
+        return await validateCommand({ config, json: values.json === true }, io);
       case 'check':
         if (rest.length > 0) throw new CliError('Usage: wasmward check [--config <path>] [--network <name>] [--json]');
         return await checkCommand(
