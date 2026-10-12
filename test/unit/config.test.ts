@@ -319,3 +319,32 @@ describe('ConfigError', () => {
     expect(error).toBeInstanceOf(Error);
   });
 });
+
+describe('the $schema key', () => {
+  const base = {
+    version: 1,
+    network: { rpcUrl: 'https://rpc.example.org', passphrase: 'Test SDF Network ; September 2015' },
+    contracts: { vault: { contractId: CONTRACT_A, supported: [{ wasmHash: HASH_1 }] } },
+  };
+
+  it('is accepted at the top of a file, so an editor can be pointed at the schema', () => {
+    expect(() => loadConfig({ $schema: './schema/wasmward.schema.json', ...base })).not.toThrow();
+  });
+
+  it('is not part of the loaded config', () => {
+    expect(loadConfig({ $schema: 'x', ...base })).toEqual(loadConfig(base));
+    expect(Object.keys(loadConfig({ $schema: 'x', ...base }))).not.toContain('$schema');
+  });
+
+  it('must be text', () => {
+    expect(() => loadConfig({ $schema: 3, ...base })).toThrow(/\$schema/);
+  });
+
+  it('is accepted at the top of a several-networks file, and refused inside a network', () => {
+    const entry = { network: base.network, contracts: base.contracts };
+    expect(() => loadConfig({ $schema: 'x', version: 1, networks: { testnet: entry } }, { network: 'testnet' })).not.toThrow();
+    expect(() => loadConfig({ version: 1, networks: { testnet: { $schema: 'x', ...entry } } }, { network: 'testnet' })).toThrow(
+      /\$\.networks\.testnet\["\$schema"\]: must not be set here; set it once at the top of the file/,
+    );
+  });
+});

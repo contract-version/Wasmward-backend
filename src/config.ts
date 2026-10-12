@@ -106,8 +106,12 @@ const networkSchema = z
     });
   });
 
+/** The key an editor reads to find schema/wasmward.schema.json. It has no meaning to Wasmward. */
+const schemaPointer = z.string().optional();
+
 const configSchema = z
   .strictObject({
+    $schema: schemaPointer,
     version: z.literal(1, 'must equal 1'),
     network: networkSchema,
     pollIntervalMs: z
@@ -185,6 +189,7 @@ export type ConfigDocument =
   | { kind: 'multi'; networks: Record<string, WasmwardConfig> };
 
 const multiSchema = z.strictObject({
+  $schema: schemaPointer,
   version: z.literal(1, 'must equal 1'),
   networks: z
     .record(z.string().regex(NETWORK_NAME), z.unknown())
@@ -240,6 +245,13 @@ export function loadConfigDocument(input: unknown, options: { source?: string } 
           issues.push({
             path: formatPath(['networks', name, 'version']),
             message: 'must not be set here; the file has one version at the top',
+          });
+          continue;
+        }
+        if (Object.hasOwn(entry, '$schema')) {
+          issues.push({
+            path: formatPath(['networks', name, '$schema']),
+            message: 'must not be set here; set it once at the top of the file',
           });
           continue;
         }
