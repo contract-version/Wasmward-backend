@@ -114,6 +114,14 @@ To check compatibility before you add the hash, pair this with soroban-upgrade-s
 
 To confirm step 3 before step 4, run `npx wasmward check` against the config in the build you are about to release. It exits 0 only if the live contract is on code that build supports. After step 4, a build that did not add the new hash will exit 1.
 
+### Checking the file without a network
+
+```bash
+npx wasmward validate --config wasmward.json
+```
+
+`validate` reads the config and reports every problem with its JSON path, or says how many networks, contracts and supported builds it holds. It never contacts an RPC, so it suits a pre-commit hook or a CI step that must pass offline. Exit `0` means the file is valid; exit `2` means it is not (it never returns `1`). `wasmward check` does the same validation first, then looks at the network.
+
 ### In a deploy pipeline
 
 ```bash
