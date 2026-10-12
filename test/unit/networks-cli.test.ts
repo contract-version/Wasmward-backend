@@ -347,7 +347,7 @@ describe('watch with several networks', () => {
 
   it('watches the chosen network and labels each line with it', async () => {
     const watch = startWatch(await fileOf(document()), ['--network', 'mainnet']);
-    await vi.waitFor(() => expect(watch.out()).toContain('mainnet/vault: pending -> supported'));
+    await vi.waitFor(() => expect(watch.out()).toContain('mainnet/vault: pending -> supported'), { timeout: 30_000 });
     expect(watch.err()).toContain('Watching 1 contract(s) on mainnet.');
     expect(testnet.lookupCalls).toEqual([]);
 
@@ -361,7 +361,7 @@ describe('watch with several networks', () => {
 
   it('includes the network in JSON lines', async () => {
     const watch = startWatch(await fileOf(document()), ['--network', 'testnet', '--json']);
-    await vi.waitFor(() => expect(watch.out().length).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(watch.out().length).toBeGreaterThan(0), { timeout: 30_000 });
     expect(JSON.parse(watch.out().split('\n')[0] ?? '')).toMatchObject({ network: 'testnet', contract: 'vault', to: 'supported' });
     stop.abort();
     await expect(watch.done).resolves.toBe(EXIT_OK);
@@ -371,7 +371,7 @@ describe('watch with several networks', () => {
     const only = document();
     delete (only['networks'] as Record<string, unknown>)['mainnet'];
     const watch = startWatch(await fileOf(only));
-    await vi.waitFor(() => expect(watch.out()).toContain('testnet/vault: pending -> supported'));
+    await vi.waitFor(() => expect(watch.out()).toContain('testnet/vault: pending -> supported'), { timeout: 30_000 });
     stop.abort();
     await expect(watch.done).resolves.toBe(EXIT_OK);
   });
@@ -385,7 +385,7 @@ describe('watch with several networks', () => {
   it('does not change how a single-network file is watched', async () => {
     const single = (document()['networks'] as Record<string, unknown>)['testnet'] as Record<string, unknown>;
     const watch = startWatch(await fileOf({ version: 1, ...single }));
-    await vi.waitFor(() => expect(watch.out()).toContain(' vault: pending -> supported'));
+    await vi.waitFor(() => expect(watch.out()).toContain(' vault: pending -> supported'), { timeout: 30_000 });
     expect(watch.out()).not.toContain('testnet/vault');
     stop.abort();
     await expect(watch.done).resolves.toBe(EXIT_OK);

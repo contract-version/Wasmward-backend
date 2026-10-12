@@ -64,7 +64,7 @@ function startWatch(args: string[] = [], signal: AbortSignal | undefined = stop.
 describe('watch', () => {
   it('prints the first status, each later change, and stops cleanly on abort', async () => {
     const watch = startWatch();
-    await vi.waitFor(() => expect(watch.out()).toContain('pending -> supported'));
+    await vi.waitFor(() => expect(watch.out()).toContain('pending -> supported'), { timeout: 30_000 });
     expect(watch.lines()[0]).toMatch(/^\d{4}-\d\d-\d\dT[\d:.]+Z vault: pending -> supported {2}[0-9a-f]{64} \(v1\.0\.0\)$/);
     expect(watch.lines()[0]).toContain(V1);
     expect(watch.err()).toContain('Watching 1 contract(s). Press Ctrl+C to stop.');
@@ -92,7 +92,7 @@ describe('watch', () => {
 
   it('prints one JSON object per change with --json', async () => {
     const watch = startWatch(['--json']);
-    await vi.waitFor(() => expect(watch.lines().length).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(watch.lines().length).toBeGreaterThan(0), { timeout: 30_000 });
     chain.setWasm(VAULT, V2);
     await vi.advanceTimersByTimeAsync(ONE_POLL);
 
@@ -116,7 +116,7 @@ describe('watch', () => {
   it('reports a contract whose first lookup fails, then its recovery', async () => {
     chain.failLookups = new Error('rpc down');
     const watch = startWatch();
-    await vi.waitFor(() => expect(watch.out()).toContain('vault: pending -> pending'));
+    await vi.waitFor(() => expect(watch.out()).toContain('vault: pending -> pending'), { timeout: 30_000 });
     expect(watch.out()).toContain('last error: rpc down');
 
     chain.failLookups = undefined;
@@ -130,7 +130,7 @@ describe('watch', () => {
   it('reports a contract that does not exist', async () => {
     chain.remove(VAULT);
     const watch = startWatch();
-    await vi.waitFor(() => expect(watch.out()).toContain('vault: pending -> missing'));
+    await vi.waitFor(() => expect(watch.out()).toContain('vault: pending -> missing'), { timeout: 30_000 });
     stop.abort();
     await expect(watch.done).resolves.toBe(EXIT_OK);
   });

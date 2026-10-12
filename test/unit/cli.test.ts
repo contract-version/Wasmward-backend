@@ -354,7 +354,7 @@ describe('check', () => {
       createServer: () => hanging,
     });
     // The config file is read with real I/O first; wait until the CLI has armed its timeout.
-    await vi.waitFor(() => expect(vi.getTimerCount()).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(vi.getTimerCount()).toBeGreaterThan(0), { timeout: 30_000 });
     await vi.advanceTimersByTimeAsync(5_000);
     const result = await pending;
     expect(result.code).toBe(EXIT_ERROR);

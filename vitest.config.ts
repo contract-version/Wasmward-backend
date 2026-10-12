@@ -2,6 +2,9 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    // The first command that loads the Stellar SDK can take seconds on a busy machine; a test that waits for it
+    // should not fail for that.
+    testTimeout: 30_000,
     include: ['test/unit/**/*.test.ts', 'test/replay/**/*.test.ts', 'test/cli/**/*.test.ts'],
     coverage: {
       provider: 'v8',
