@@ -30,6 +30,7 @@ const USAGE = `Usage:
                [--wasm <file.wasm>] [--label <label>] [--rpc-url <url>] [--config <path>] [--json]
   wasmward hash <file.wasm> [--json]
   wasmward add <name> <file.wasm> --label <label> [--config <path>] [--network <name>] [--json]
+  wasmward remove <name> <label-or-hash> [--config <path>] [--network <name>] [--json]
   wasmward validate [--config <path>] [--json]
   wasmward check [--config <path>] [--network <name>] [--min-ttl-days <days>] [--json]
   wasmward watch [--config <path>] [--network <name>] [--json]
@@ -39,6 +40,7 @@ Commands:
           or, failing that, the code that is live on the network right now.
   hash    Print the lowercase SHA-256 hash of a Wasm file.
   add     Add a Wasm file's hash to a contract's supported list in the config.
+  remove  Take a build off a contract's supported list, by label or hash. It never removes the last one.
   validate  Check the config file alone, without contacting any network. Exit 0 if it is valid.
   check   Look up the live code of every configured contract and report its status.
           With a multi-network config and no --network, every network is checked.
@@ -380,6 +382,65 @@ async function addCommand(
   return EXIT_OK;
 }
 
+/** Takes a build off a contract's supported list, by its label or by its hash. */
+async function removeCommand(
+  positionals: string[],
+  options: { config: string; network: string | undefined; json: boolean },
+  io: CliIo,
+): Promise<number> {
+  const [name, selector, ...extra] = positionals;
+  if (name === undefined || selector === undefined || extra.length > 0) {
+    throw new CliError('Usage: wasmward remove <name> <label-or-hash> [--config <path>] [--network <name>] [--json]');
+  }
+  const raw = await readRawConfig(options.config);
+  const { loadConfigDocument } = await loadConfigModule();
+  const document = loadConfigDocument(raw);
+  const { name: networkName, config: current } = selectNetwork(document, options.network);
+  const where = networkName === undefined ? '' : ` on ${networkName}`;
+
+  const contract = Object.hasOwn(current.contracts, name) ? current.contracts[name] : undefined;
+  if (contract === undefined) {
+    throw new CliError(`Unknown contract '${name}'${where}. Configured contracts: ${Object.keys(current.contracts).join(', ')}.`);
+  }
+
+  const byHash = /^[0-9a-fA-F]{64}$/.test(selector);
+  const matches = contract.supported.filter((version) => (byHash ? version.wasmHash === selector.toLowerCase() : version.label === selector));
+  const [match, ...others] = matches;
+  if (match === undefined) {
+    const have = contract.supported.map((version) => version.label ?? version.wasmHash).join(', ');
+    throw new CliError(`'${name}'${where} has no supported build ${byHash ? 'with that hash' : `labelled '${selector}'`}. It has: ${have}.`);
+  }
+  if (others.length > 0) {
+    throw new CliError(`${matches.length} builds of '${name}'${where} are labelled '${selector}'; remove one by its hash instead.`);
+  }
+  // Removing the last build would leave a contract nothing can write to, which is never what a release means.
+  if (contract.supported.length === 1) {
+    throw new CliError(`'${selector}' is the only supported build of '${name}'${where}. Add the build that replaces it first, then remove this one.`);
+  }
+
+  const section =
+    networkName === undefined ? raw : (raw['networks'] as Record<string, Record<string, unknown>>)[networkName];
+  const rawContract = (section?.['contracts'] as Record<string, { supported: { wasmHash: string }[] }> | undefined)?.[name];
+  if (rawContract !== undefined) {
+    rawContract.supported = rawContract.supported.filter((version) => version.wasmHash.toLowerCase() !== match.wasmHash);
+  }
+  loadConfigDocument(raw, { source: `${options.config} (without the removed build)` });
+
+  await writeFileAtomic(options.config, `${JSON.stringify(raw, null, 2)}\n`);
+  io.stdout(
+    options.json
+      ? jsonLine({
+          contract: name,
+          ...(networkName === undefined ? {} : { network: networkName }),
+          wasmHash: match.wasmHash,
+          ...(match.label === undefined ? {} : { label: match.label }),
+          config: options.config,
+        })
+      : `Removed ${match.label ?? match.wasmHash} (${match.wasmHash}) from '${name}'${where} in ${options.config}\n`,
+  );
+  return EXIT_OK;
+}
+
 async function watchCommand(options: { config: string; network: string | undefined; json: boolean }, io: CliIo): Promise<number> {
   const signal = io.signal;
   if (signal === undefined) throw new CliError('Internal error: watch needs a signal to know when to stop.');
@@ -711,6 +772,8 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
         );
       case 'add':
         return await addCommand(rest, { config, network: values.network, label: values.label, json: values.json === true }, io);
+      case 'remove':
+        return await removeCommand(rest, { config, network: values.network, json: values.json === true }, io);
       case 'validate':
         if (rest.length > 0) throw new CliError('Usage: wasmward validate [--config <path>] [--json]');
         return await validateCommand({ config, json: values.json === true }, io);
