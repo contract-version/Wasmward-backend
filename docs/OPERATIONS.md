@@ -108,7 +108,7 @@ The order matters. A contract that is upgraded before your apps know the new has
    ```
 3. **Release the app** with the updated config. It now supports both the old and new code.
 4. **Upgrade the contract.** Apps running the new release carry on; apps still on the old release are blocked, which is the point.
-5. **Optionally remove the old hash** in a later release once nothing needs it.
+5. **Optionally remove the old hash** in a later release once nothing needs it: `npx wasmward remove vault v1` (or give the hash). It refuses to remove the only build of a contract, and an ambiguous label, so you cannot leave a contract that nothing can write to.
 
 To check compatibility before you add the hash, pair this with soroban-upgrade-safeguard; see [PAIRING.md](PAIRING.md) for the full workflow, including a GitHub Actions example.
 
