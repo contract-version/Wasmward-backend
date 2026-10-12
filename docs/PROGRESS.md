@@ -421,3 +421,16 @@
 - Backend: 660 tests pass (34 new), 99.64% lines; typecheck, lint and build clean; the new tests fail without the change.
 - Live: `wasmward check`, the browser demo and the contract's health workflow all report the real fixture's code (about 28 days left); the real code-entry response from testnet is now part of the replay tests.
 - GitHub: CI green in all three repositories.
+
+## Extra: tools around the config (all three repositories)
+
+**Date:** 2026-10-12
+
+**Backend** (D-031): `wasmward validate` (no network), `wasmward remove` (never the last build), `--version`, a JSON Schema for `wasmward.json` with an ignored `$schema` key, and `docs/CLI.md`, kept in step with `--help` by a test.
+**Contract:** `scripts/live-build.mjs` says which build the fixture runs and the weekly health workflow now fails if it is not v1; `sync-config.mjs` writes the `$schema` key; a test keeps the README's scripts table complete (it found `check-builds.mjs` missing).
+**Frontend:** the Changes log is reachable by keyboard, the contract row shows a short address, the phone's browser bar matches the page, and `wasmward.json` carries the `$schema` key.
+
+**Results**
+- Backend: 759 tests pass (99 new), 99.66% lines; typecheck, lint and build clean. One full run failed a `watch` test that waits for the SDK to load on a busy machine; it passes alone and the waits now allow 30 seconds.
+- Contract: 195 script tests pass. Run against live testnet: `live-build.mjs --expect v1` exits 0 and `--expect v2` exits 1; the real CLI accepts the config with `$schema` and `check --min-ttl-days 3` still passes (about 25 days left).
+- Frontend: 387 tests pass. In the browser pane against live testnet at 375px wide: no horizontal scroll, badge `supported`, short address shown.
