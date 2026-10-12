@@ -114,6 +114,10 @@ To check compatibility before you add the hash, pair this with soroban-upgrade-s
 
 To confirm step 3 before step 4, run `npx wasmward check` against the config in the build you are about to release. It exits 0 only if the live contract is on code that build supports. After step 4, a build that did not add the new hash will exit 1.
 
+### Editor help for the config
+
+The package includes a JSON Schema (`@wasmward/core/schema.json`, the file `schema/wasmward.schema.json`). Add `"$schema": "./node_modules/@wasmward/core/schema/wasmward.schema.json"` as the first key of `wasmward.json` and an editor that understands JSON Schema (VS Code does) completes the field names, shows the descriptions and flags a wrong shape. Wasmward ignores the key. A several-networks file takes it once, at the top, not inside a network. The schema cannot express contract ID checksums, duplicate hashes or RPC URLs, or `maxStalenessMs` needing to be at least twice `pollIntervalMs`; those are checked by `wasmward validate` and by `loadConfig`.
+
 ### Checking the file without a network
 
 ```bash
