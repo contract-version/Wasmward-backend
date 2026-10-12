@@ -128,6 +128,7 @@ Only the `supported` status allows writes. See [docs/API.md](docs/API.md) for ev
 
 ## Documentation
 
+- [Command line reference](docs/CLI.md): every command, option, JSON shape and exit code
 - [API reference](docs/API.md)
 - [Operations guide](docs/OPERATIONS.md): recommended settings, upgrade order, health endpoints, limits
 - [Threat model](docs/THREAT-MODEL.md): what it defends against, what it trusts, and what it cannot do
