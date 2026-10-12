@@ -58,6 +58,7 @@ Options:
   --wasm <file>    init: take the first supported hash from this build instead of from the network
   --min-ttl-days <n>  check: also fail (exit 1) if a supported contract has fewer than n days left
   --json           Machine-readable output
+  -v, --version    Show the version
   -h, --help       Show this help
 `;
 
@@ -72,6 +73,8 @@ export interface CliIo {
   now?: () => number;
   /** Ends `watch` when aborted. The entry point aborts it on Ctrl+C or SIGTERM. */
   signal?: AbortSignal;
+  /** What `--version` prints. The built entry point supplies the package version. */
+  version?: string | undefined;
 }
 
 /** Thrown inside a command to end it with a message and an exit code. */
@@ -638,6 +641,12 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
 
   const { positionals, values } = parsed;
   const [command, ...rest] = positionals;
+  if (values.version === true) {
+    const version = io.version ?? 'unknown';
+    io.stdout(json ? jsonLine({ version }) : `wasmward ${version}
+`);
+    return EXIT_OK;
+  }
   if (values.help === true) {
     io.stdout(USAGE);
     return EXIT_OK;
@@ -705,6 +714,7 @@ function parseCommandLine(argv: string[]) {
       'rpc-url': { type: 'string' },
       passphrase: { type: 'string' },
       json: { type: 'boolean' },
+      version: { type: 'boolean', short: 'v' },
       help: { type: 'boolean', short: 'h' },
     },
   });

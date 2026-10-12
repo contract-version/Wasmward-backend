@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { defineConfig } from 'tsup';
+
+const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string };
 
 export default defineConfig([
   {
@@ -18,6 +21,7 @@ export default defineConfig([
     target: 'node20',
     sourcemap: true,
     banner: { js: '#!/usr/bin/env node' },
+    define: { __WASMWARD_VERSION__: JSON.stringify(version) },
     external: ['@stellar/stellar-sdk', 'zod'],
   },
 ]);
