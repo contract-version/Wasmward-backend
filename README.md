@@ -73,6 +73,7 @@ In a browser, use `loadConfig` and `guard.subscribe` directly. A complete, runna
 npx wasmward init vault C... --preset testnet --wasm build/contract.wasm   # create wasmward.json
 npx wasmward hash build/contract.wasm                    # print a Wasm file's SHA-256
 npx wasmward add vault build/contract.wasm --label v2    # add it to wasmward.json
+npx wasmward remove vault v1                             # take a build off the list (never the last one)
 npx wasmward validate                                    # check wasmward.json alone, no network needed
 npx wasmward check                                       # exit 0 only if every contract is supported
 npx wasmward check --min-ttl-days 3                      # ...and none expires within 3 days
