@@ -86,6 +86,8 @@ One file can describe several networks (for example testnet and mainnet); pass `
 
 `watch` keeps checking and prints a line whenever a contract's status changes, which is handy while rehearsing an upgrade. Add `--json` for machine-readable output (one JSON object per line for `watch`).
 
+**Editor help.** The package ships a JSON Schema for `wasmward.json`. Point your editor at it with a `$schema` key (Wasmward ignores the key) and it completes field names and flags a wrong shape as you type: `"$schema": "./node_modules/@wasmward/core/schema/wasmward.schema.json"`. The schema cannot check contract ID checksums, duplicate hashes, or `maxStalenessMs` against `pollIntervalMs`; `wasmward validate` does.
+
 ## In GitHub Actions
 
 The repository is also a GitHub Action that runs `wasmward check` and fails the workflow if a contract runs code your config does not support, cannot be checked, or is about to expire:
