@@ -414,4 +414,43 @@ describe('check', () => {
     const result = await main(['check', '--config', config], { stdout: () => undefined, stderr: () => undefined });
     expect(result).toBe(EXIT_ERROR);
   });
+
+  it('init reports when the Wasm code entry is archived', async () => {
+    chain.codeTtl = -1;
+    const outConfig = join(dir, 'init-archived-code.json');
+    const result = await run(['init', 'vault', VAULT, '--preset', 'testnet', '--config', outConfig]);
+    expect(result.code).toBe(EXIT_ERROR);
+    expect(result.err).toContain(`The Wasm code of ${VAULT} has expired (archived) or cannot be found; restore it first.`);
+  });
+
+  it('watch forwards fallback servers from createFallbackServers to the version guard', async () => {
+    const primary = new FakeChain();
+    primary.failLookups = new Error('primary down');
+    const fallback = new FakeChain();
+    fallback.setWasm(VAULT, V1);
+    const controller = new AbortController();
+    const config = await configFile({
+      ...baseConfig(),
+      network: {
+        rpcUrl: 'http://127.0.0.1:9',
+        fallbackRpcUrls: ['http://127.0.0.1:10'],
+        passphrase: PASSPHRASE,
+      },
+    });
+    const result = await run(['watch', '--json', '--config', config], {
+      createServer: () => primary,
+      createFallbackServers: () => {
+        queueMicrotask(() => controller.abort());
+        return [fallback];
+      },
+      signal: controller.signal,
+    });
+    expect(result.code).toBe(EXIT_OK);
+    expect(JSON.parse(result.out.trim())).toMatchObject({
+      contract: 'vault',
+      from: 'pending',
+      to: 'supported',
+      liveWasmHash: V1,
+    });
+  });
 });

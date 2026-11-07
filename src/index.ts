@@ -7,7 +7,14 @@ export type { EndpointSet } from './endpoints.js';
 export { fetchExecutables, MAX_KEYS_PER_REQUEST } from './fetch.js';
 export type { LedgerEntriesSource } from './fetch.js';
 export { createVersionGuard } from './guard.js';
-export type { GuardServer, StatusChange, StatusListener, VersionGuard, VersionGuardOptions } from './guard.js';
+export type {
+  AssertWritableOptions,
+  GuardServer,
+  StatusChange,
+  StatusListener,
+  VersionGuard,
+  VersionGuardOptions,
+} from './guard.js';
 export { hashWasm } from './hash.js';
 export type { ContractHealth, HealthReport } from './health.js';
 export { createPoller, nextDelayMs, MAX_TIMER_MS } from './poller.js';

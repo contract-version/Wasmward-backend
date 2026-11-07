@@ -657,3 +657,37 @@ describe('stop', () => {
     expect(guard.isWritable('vault')).toBe(true);
   });
 });
+
+describe('advanced guard settings', () => {
+  it('enforces minTtlLedgers on assertWritable, assertWritableFresh, and guard()', async () => {
+    chain.ttl = 100;
+    const guard = await started();
+    expect(() => guard.assertWritable('vault', { minTtlLedgers: 100 })).not.toThrow();
+    expect(() => guard.assertWritable('vault', { minTtlLedgers: 101 })).toThrow(
+      /instance expires in 100 ledgers.*below the required minimum of 101 ledgers/,
+    );
+
+    await expect(guard.assertWritableFresh('vault', { minTtlLedgers: 100 })).resolves.toBeUndefined();
+    await expect(guard.assertWritableFresh('vault', { minTtlLedgers: 200 })).rejects.toThrow(WriteBlockedError);
+
+    const write = vi.fn().mockResolvedValue('done');
+    const wrapped = guard.guard('vault', write, { minTtlLedgers: 200 });
+    await expect(wrapped()).rejects.toThrow(WriteBlockedError);
+    expect(write).not.toHaveBeenCalled();
+
+    expect(() => guard.assertWritable('vault', { minTtlLedgers: 0 })).toThrow(ConfigError);
+    expect(() => guard.guard('vault', write, { minTtlLedgers: -1 })).toThrow(ConfigError);
+  });
+
+  it('validates and honours custom lookupTimeoutMs and random in VersionGuardOptions', async () => {
+    expect(() => createVersionGuard(configWith(), { server: chain, lookupTimeoutMs: 0 })).toThrow(ConfigError);
+    const guard = createVersionGuard(configWith(), {
+      server: chain,
+      lookupTimeoutMs: 2_500,
+      random: () => 0.5,
+    });
+    guards.push(guard);
+    await guard.start();
+    expect(guard.isWritable('vault')).toBe(true);
+  });
+});

@@ -306,7 +306,13 @@ async function initCommand(
       throw new CliError(`Could not read the live code of ${contractId}: ${result?.kind === 'error' ? result.message : 'no answer'}`);
     }
     if (result.kind === 'missing') throw new CliError(`No contract with ID ${contractId} exists on this network.`);
-    if (result.kind === 'archived') throw new CliError(`The instance of ${contractId} has expired (archived); restore it first.`);
+    if (result.kind === 'archived') {
+      throw new CliError(
+        result.entry === 'code'
+          ? `The Wasm code of ${contractId} has expired (archived) or cannot be found; restore it first.`
+          : `The instance of ${contractId} has expired (archived); restore it first.`,
+      );
+    }
     if (result.kind === 'stellar-asset') {
       throw new CliError(`${contractId} is a Stellar Asset Contract. Wasmward guards contracts that run Wasm code.`);
     }
@@ -449,7 +455,8 @@ async function watchCommand(options: { config: string; network: string | undefin
   const { name: networkName, config } = selectNetwork(await loadConfigDocumentFile(options.config), options.network);
   const now = io.now ?? Date.now;
   const server = await (io.createServer ?? defaultServer)(config);
-  const guard = createVersionGuard(config, { server, now });
+  const fallbackServers = await (io.createFallbackServers ?? defaultFallbackServers)(config);
+  const guard = createVersionGuard(config, { server, fallbackServers, now });
 
   const report = (state: ContractState, from: string): void => {
     const at = new Date(now()).toISOString();

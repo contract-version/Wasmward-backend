@@ -51,6 +51,7 @@ export function withTimeout<T>(work: Promise<T>, timeoutMs: number, label: strin
     const timer = setTimeout(() => {
       reject(new Error(`${label} timed out after ${timeoutMs}ms`));
     }, timeoutMs);
+    if (typeof timer === 'object' && typeof timer.unref === 'function') timer.unref();
     work.then(
       (value) => {
         clearTimeout(timer);

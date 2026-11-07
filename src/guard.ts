@@ -3,7 +3,16 @@ import { ConfigError, WriteBlockedError } from './errors.js';
 import { createEndpointSet, createRpcClient, type GuardServer } from './endpoints.js';
 import { buildHealth, type HealthReport } from './health.js';
 import { createPoller, MAX_TIMER_MS } from './poller.js';
-import { describeBlock, effectiveStatus, initialState, isWritable, nextState } from './state.js';
+import {
+  describeBlock,
+  describeTimeLeft,
+  effectiveStatus,
+  expiringEntry,
+  initialState,
+  isWritable,
+  ledgersUntilExpiry,
+  nextState,
+} from './state.js';
 import type { ContractConfig, ContractState, LiveExecutable, Status, WasmwardConfigInput } from './types.js';
 
 /** A single lookup waits at most this long, and never longer than one poll interval. */
@@ -18,6 +27,15 @@ export interface VersionGuardOptions {
   fallbackServers?: GuardServer[];
   /** Clock in milliseconds since the Unix epoch. Defaults to `Date.now`. */
   now?: () => number;
+  /** Custom per-lookup RPC timeout in milliseconds, clamped to `[1, pollIntervalMs]`. */
+  lookupTimeoutMs?: number;
+  /** Uniform `[0, 1)` random source for poll jitter. Defaults to `Math.random`. */
+  random?: () => number;
+}
+
+export interface AssertWritableOptions {
+  /** Also block writes if the contract's remaining TTL (instance or Wasm code) is below this many ledgers. */
+  minTtlLedgers?: number | undefined;
 }
 
 /** Delivered to subscribers when a contract's status changes. */
@@ -39,18 +57,25 @@ export interface VersionGuard {
   status(): Record<string, ContractState>;
   isWritable(name: string): boolean;
   /** Throws {@link WriteBlockedError} unless the contract is supported and freshly verified. */
-  assertWritable(name: string): void;
+  assertWritable(name: string, options?: AssertWritableOptions): void;
   /** Looks the contract up once more, then asserts. Blocks if that lookup fails. */
-  assertWritableFresh(name: string): Promise<void>;
+  assertWritableFresh(name: string, options?: AssertWritableOptions): Promise<void>;
   /** Calls `listener` whenever a contract's status changes. Returns an unsubscribe function. */
   subscribe(listener: StatusListener): () => void;
   /** Wraps a write function so each call first asserts that the contract is writable. */
   guard<A extends unknown[], R>(
     name: string,
     write: (...args: A) => R | Promise<R>,
-    options?: { fresh?: boolean },
+    options?: { fresh?: boolean; minTtlLedgers?: number },
   ): (...args: A) => Promise<Awaited<R>>;
   health(): HealthReport;
+}
+
+function validateMinTtlLedgers(minTtlLedgers: number | undefined): void {
+  if (minTtlLedgers === undefined) return;
+  if (!Number.isInteger(minTtlLedgers) || minTtlLedgers < 1) {
+    throw new ConfigError(`minTtlLedgers must be a positive integer, got ${String(minTtlLedgers)}.`);
+  }
 }
 
 export function createVersionGuard(input: WasmwardConfigInput, options: VersionGuardOptions = {}): VersionGuard {
@@ -58,7 +83,16 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
   const config = loadConfig(input);
   const now = options.now ?? Date.now;
   const { maxStalenessMs } = config;
-  const lookupTimeoutMs = Math.min(config.pollIntervalMs, MAX_LOOKUP_TIMEOUT_MS);
+  if (
+    options.lookupTimeoutMs !== undefined &&
+    (!Number.isInteger(options.lookupTimeoutMs) || options.lookupTimeoutMs < 1)
+  ) {
+    throw new ConfigError(`lookupTimeoutMs must be a positive integer, got ${String(options.lookupTimeoutMs)}.`);
+  }
+  const lookupTimeoutMs =
+    options.lookupTimeoutMs !== undefined
+      ? Math.min(options.lookupTimeoutMs, config.pollIntervalMs)
+      : Math.min(config.pollIntervalMs, MAX_LOOKUP_TIMEOUT_MS);
   const endpoints = createEndpointSet(
     [
       options.server ?? createRpcClient(config.network.rpcUrl, lookupTimeoutMs),
@@ -197,7 +231,12 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
     return everyLookupFailed;
   }
 
-  const poller = createPoller({ intervalMs: config.pollIntervalMs, maxStalenessMs, tick });
+  const poller = createPoller({
+    intervalMs: config.pollIntervalMs,
+    maxStalenessMs,
+    tick,
+    ...(options.random === undefined ? {} : { random: options.random }),
+  });
 
   function blocked(name: string, reason?: string): WriteBlockedError {
     const state = stateFor(name);
@@ -210,14 +249,26 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
     });
   }
 
-  function assertWritable(name: string): void {
+  function assertWritable(name: string, assertOptions?: AssertWritableOptions): void {
     const state = stateFor(name);
+    validateMinTtlLedgers(assertOptions?.minTtlLedgers);
     if (!networkVerified) throw blocked(name, 'the guard has not been started, so the network is not verified');
     if (!isWritable(state, now(), maxStalenessMs)) throw blocked(name);
+    if (assertOptions?.minTtlLedgers !== undefined) {
+      const remaining = ledgersUntilExpiry(state);
+      if (remaining !== undefined && remaining < assertOptions.minTtlLedgers) {
+        const which = expiringEntry(state) === 'code' ? 'Wasm code' : 'instance';
+        throw blocked(
+          name,
+          `${which} expires in ${remaining} ledgers (${describeTimeLeft(remaining)}), below the required minimum of ${assertOptions.minTtlLedgers} ledgers`,
+        );
+      }
+    }
   }
 
-  async function assertWritableFresh(name: string): Promise<void> {
+  async function assertWritableFresh(name: string, assertOptions?: AssertWritableOptions): Promise<void> {
     const contract = contractFor(name);
+    validateMinTtlLedgers(assertOptions?.minTtlLedgers);
     if (!networkVerified) throw blocked(name, 'the guard has not been started, so the network is not verified');
     const startedAt = now();
     const result =
@@ -228,7 +279,7 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
     if (result.kind === 'error') {
       throw blocked(name, `the live code could not be checked just now (${result.message})`);
     }
-    assertWritable(name);
+    assertWritable(name, assertOptions);
   }
 
 
@@ -288,15 +339,18 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
     guard<A extends unknown[], R>(
       name: string,
       write: (...args: A) => R | Promise<R>,
-      guardOptions: { fresh?: boolean } = {},
+      guardOptions: { fresh?: boolean; minTtlLedgers?: number } = {},
     ): (...args: A) => Promise<Awaited<R>> {
       contractFor(name); // Unknown names fail when the wrapper is made, not on first use.
+      validateMinTtlLedgers(guardOptions.minTtlLedgers);
       const fresh = guardOptions.fresh === true;
+      const assertOpts: AssertWritableOptions | undefined =
+        guardOptions.minTtlLedgers === undefined ? undefined : { minTtlLedgers: guardOptions.minTtlLedgers };
       return async (...args: A): Promise<Awaited<R>> => {
         if (fresh) {
-          await assertWritableFresh(name);
+          await assertWritableFresh(name, assertOpts);
         } else {
-          assertWritable(name);
+          assertWritable(name, assertOpts);
         }
         return await write(...args);
       };
