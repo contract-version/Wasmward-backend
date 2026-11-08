@@ -7,7 +7,16 @@ import { ConfigError } from './errors.js';
 import type { GuardServer } from './guard.js';
 import { hashWasm } from './hash.js';
 import { buildHealth, type ContractHealth, type HealthReport } from './health.js';
-import { describeBlock, describeTimeLeft, expiringEntry, EXPIRY_WARNING_LEDGERS, initialState, ledgersUntilExpiry, nextState, SECONDS_PER_LEDGER } from './state.js';
+import {
+  describeBlock,
+  describeTimeLeft,
+  expiringEntry,
+  EXPIRY_WARNING_LEDGERS,
+  initialState,
+  ledgersUntilExpiry,
+  nextState,
+  SECONDS_PER_LEDGER,
+} from './state.js';
 import type { ContractState, WasmwardConfig } from './types.js';
 
 // The Stellar SDK is large and slow to load. These modules pull it in, so they are imported only by
@@ -16,6 +25,8 @@ const loadConfigModule = () => import('./config.js');
 const loadNodeModule = () => import('./node.js');
 const loadEndpointsModule = () => import('./endpoints.js');
 const loadGuardModule = () => import('./guard.js');
+const loadAuditModule = () => import('./audit.js');
+const loadTelemetryModule = () => import('./telemetry.js');
 
 /** Exit codes, as documented for deploy gates. */
 export const EXIT_OK = 0;
@@ -32,7 +43,9 @@ const USAGE = `Usage:
   wasmward add <name> <file.wasm> --label <label> [--config <path>] [--network <name>] [--json]
   wasmward remove <name> <label-or-hash> [--config <path>] [--network <name>] [--json]
   wasmward validate [--config <path>] [--json]
-  wasmward check [--config <path>] [--network <name>] [--min-ttl-days <days>] [--json]
+  wasmward audit [--config <path>] [--network <name>] [--strict] [--table] [--json]
+  wasmward diff <before.json> <after.json> [--network <name>] [--strict] [--json]
+  wasmward check [--config <path>] [--network <name>] [--min-ttl-days <days>] [--table] [--prometheus] [--json]
   wasmward watch [--config <path>] [--network <name>] [--json]
 
 Commands:
@@ -42,13 +55,16 @@ Commands:
   add     Add a Wasm file's hash to a contract's supported list in the config.
   remove  Take a build off a contract's supported list, by label or hash. It never removes the last one.
   validate  Check the config file alone, without contacting any network. Exit 0 if it is valid.
+  audit   Audit the config file for operational, resilience, and security best practices.
+  diff    Compare two config files and report added, removed, or modified contracts and hashes.
   check   Look up the live code of every configured contract and report its status.
           With a multi-network config and no --network, every network is checked.
   watch   Keep checking and print each status change until interrupted (Ctrl+C).
 
 Exit codes:
   0  success; for check, every contract is supported; for watch, stopped by Ctrl+C
-  1  check: at least one contract is not supported, or (with --min-ttl-days) is too close to expiring
+  1  check: at least one contract is not supported, or (with --min-ttl-days) is too close to expiring;
+     audit/diff: findings or breaking changes failed the check (with --strict)
   2  invalid input, unreadable file, invalid config, or the network could not be checked
      (for watch, also if it cannot start)
 
@@ -61,6 +77,9 @@ Options:
   --passphrase <t> init: the network passphrase, when not using --preset
   --wasm <file>    init: take the first supported hash from this build instead of from the network
   --min-ttl-days <n>  check: also fail (exit 1) if a supported contract has fewer than n days left
+  --strict         audit: fail (exit 1) on warnings; diff: fail (exit 1) on breaking changes
+  --table          check, audit: render output as an aligned ASCII table
+  --prometheus     check: render health output in Prometheus text exposition format
   --json           Machine-readable output
   -v, --version    Show the version
   -h, --help       Show this help
@@ -171,7 +190,9 @@ function selectNetwork(
     const only = names.length === 1 ? names[0] : undefined;
     const config = only === undefined ? undefined : document.networks[only];
     if (only === undefined || config === undefined) {
-      throw new CliError(`This config describes ${names.length} networks (${names.join(', ')}); choose one with --network <name>.`);
+      throw new CliError(
+        `This config describes ${names.length} networks (${names.join(', ')}); choose one with --network <name>.`,
+      );
     }
     return { name: only, config };
   }
@@ -245,7 +266,8 @@ async function initCommand(
     );
   }
 
-  const preset = options.preset === undefined ? undefined : Object.hasOwn(PRESETS, options.preset) ? PRESETS[options.preset] : undefined;
+  const preset =
+    options.preset === undefined ? undefined : Object.hasOwn(PRESETS, options.preset) ? PRESETS[options.preset] : undefined;
   if (options.preset !== undefined && preset === undefined) {
     throw new CliError(`Unknown preset '${options.preset}'. Choose one of: ${Object.keys(PRESETS).join(', ')}.`);
   }
@@ -303,7 +325,9 @@ async function initCommand(
     }
     const result = (await endpoints.lookup([contractId], timeoutMs)).get(contractId);
     if (result === undefined || result.kind === 'error') {
-      throw new CliError(`Could not read the live code of ${contractId}: ${result?.kind === 'error' ? result.message : 'no answer'}`);
+      throw new CliError(
+        `Could not read the live code of ${contractId}: ${result?.kind === 'error' ? result.message : 'no answer'}`,
+      );
     }
     if (result.kind === 'missing') throw new CliError(`No contract with ID ${contractId} exists on this network.`);
     if (result.kind === 'archived') {
@@ -356,7 +380,9 @@ async function addCommand(
 
   const contract = Object.hasOwn(current.contracts, name) ? current.contracts[name] : undefined;
   if (contract === undefined) {
-    throw new CliError(`Unknown contract '${name}'${where}. Configured contracts: ${Object.keys(current.contracts).join(', ')}.`);
+    throw new CliError(
+      `Unknown contract '${name}'${where}. Configured contracts: ${Object.keys(current.contracts).join(', ')}.`,
+    );
   }
 
   const wasmHash = await hashWasm(await readWasm(file));
@@ -406,27 +432,39 @@ async function removeCommand(
 
   const contract = Object.hasOwn(current.contracts, name) ? current.contracts[name] : undefined;
   if (contract === undefined) {
-    throw new CliError(`Unknown contract '${name}'${where}. Configured contracts: ${Object.keys(current.contracts).join(', ')}.`);
+    throw new CliError(
+      `Unknown contract '${name}'${where}. Configured contracts: ${Object.keys(current.contracts).join(', ')}.`,
+    );
   }
 
   const byHash = /^[0-9a-fA-F]{64}$/.test(selector);
-  const matches = contract.supported.filter((version) => (byHash ? version.wasmHash === selector.toLowerCase() : version.label === selector));
+  const matches = contract.supported.filter((version) =>
+    byHash ? version.wasmHash === selector.toLowerCase() : version.label === selector,
+  );
   const [match, ...others] = matches;
   if (match === undefined) {
     const have = contract.supported.map((version) => version.label ?? version.wasmHash).join(', ');
-    throw new CliError(`'${name}'${where} has no supported build ${byHash ? 'with that hash' : `labelled '${selector}'`}. It has: ${have}.`);
+    throw new CliError(
+      `'${name}'${where} has no supported build ${byHash ? 'with that hash' : `labelled '${selector}'`}. It has: ${have}.`,
+    );
   }
   if (others.length > 0) {
-    throw new CliError(`${matches.length} builds of '${name}'${where} are labelled '${selector}'; remove one by its hash instead.`);
+    throw new CliError(
+      `${matches.length} builds of '${name}'${where} are labelled '${selector}'; remove one by its hash instead.`,
+    );
   }
   // Removing the last build would leave a contract nothing can write to, which is never what a release means.
   if (contract.supported.length === 1) {
-    throw new CliError(`'${selector}' is the only supported build of '${name}'${where}. Add the build that replaces it first, then remove this one.`);
+    throw new CliError(
+      `'${selector}' is the only supported build of '${name}'${where}. Add the build that replaces it first, then remove this one.`,
+    );
   }
 
   const section =
     networkName === undefined ? raw : (raw['networks'] as Record<string, Record<string, unknown>>)[networkName];
-  const rawContract = (section?.['contracts'] as Record<string, { supported: { wasmHash: string }[] }> | undefined)?.[name];
+  const rawContract = (section?.['contracts'] as Record<string, { supported: { wasmHash: string }[] }> | undefined)?.[
+    name
+  ];
   if (rawContract !== undefined) {
     rawContract.supported = rawContract.supported.filter((version) => version.wasmHash.toLowerCase() !== match.wasmHash);
   }
@@ -447,7 +485,10 @@ async function removeCommand(
   return EXIT_OK;
 }
 
-async function watchCommand(options: { config: string; network: string | undefined; json: boolean }, io: CliIo): Promise<number> {
+async function watchCommand(
+  options: { config: string; network: string | undefined; json: boolean },
+  io: CliIo,
+): Promise<number> {
   const signal = io.signal;
   if (signal === undefined) throw new CliError('Internal error: watch needs a signal to know when to stop.');
   const { loadConfigDocumentFile } = await loadNodeModule();
@@ -473,8 +514,7 @@ async function watchCommand(options: { config: string; network: string | undefin
     const detail =
       reason ?? `${state.liveWasmHash ?? ''}${state.matchedLabel === undefined ? '' : ` (${state.matchedLabel})`}`;
     const label = networkName === undefined ? state.name : `${networkName}/${state.name}`;
-    io.stdout(`${at} ${label}: ${from} -> ${state.status}  ${detail}
-`);
+    io.stdout(`${at} ${label}: ${from} -> ${state.status}  ${detail}\n`);
   };
 
   guard.subscribe((change) => report(change.state, change.from));
@@ -487,8 +527,11 @@ async function watchCommand(options: { config: string; network: string | undefin
   for (const state of Object.values(guard.status())) {
     if (state.status === 'pending') report(state, 'pending');
   }
-  if (!options.json) io.stderr(`Watching ${Object.keys(config.contracts).length} contract(s)${networkName === undefined ? '' : ` on ${networkName}`}. Press Ctrl+C to stop.
-`);
+  if (!options.json) {
+    io.stderr(
+      `Watching ${Object.keys(config.contracts).length} contract(s)${networkName === undefined ? '' : ` on ${networkName}`}. Press Ctrl+C to stop.\n`,
+    );
+  }
 
   if (!signal.aborted) {
     await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
@@ -644,7 +687,10 @@ const LOOKUP_FAILED_NOTE = 'Some contracts could not be looked up; see the messa
 async function validateCommand(options: { config: string; json: boolean }, io: CliIo): Promise<number> {
   const { loadConfigDocumentFile } = await loadNodeModule();
   const document = await loadConfigDocumentFile(options.config);
-  const networks = document.kind === 'single' ? [{ name: undefined, config: document.config }] : Object.entries(document.networks).map(([name, config]) => ({ name, config }));
+  const networks =
+    document.kind === 'single'
+      ? [{ name: undefined, config: document.config }]
+      : Object.entries(document.networks).map(([name, config]) => ({ name, config }));
   const summary = networks.map(({ name, config }) => ({
     ...(name === undefined ? {} : { name }),
     rpcUrl: config.network.rpcUrl,
@@ -658,19 +704,89 @@ async function validateCommand(options: { config: string; json: boolean }, io: C
     io.stdout(jsonLine({ ok: true, config: options.config, networks: summary }));
     return EXIT_OK;
   }
-  const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? '' : 's'}`;
   const contractCount = summary.reduce((total, network) => total + network.contracts.length, 0);
-  const lines = [`${options.config} is valid: ${plural(summary.length, 'network')}, ${plural(contractCount, 'contract')}.`];
+  const lines = [
+    `${options.config} is valid: ${plural(summary.length, 'network')}, ${plural(contractCount, 'contract')}.`,
+  ];
   for (const network of summary) {
     if (network.name !== undefined) lines.push(`${network.name}:`);
-    for (const contract of network.contracts) lines.push(`  ${contract.name}  ${plural(contract.supported, 'supported build')}`);
+    for (const contract of network.contracts) {
+      lines.push(`  ${contract.name}  ${plural(contract.supported, 'supported build')}`);
+    }
   }
   io.stdout(`${lines.join('\n')}\n`);
   return EXIT_OK;
 }
 
+/** Audits the config file for operational, resilience, and security best practices. */
+async function auditCommand(
+  options: {
+    config: string;
+    network: string | undefined;
+    strict: boolean;
+    table: boolean;
+    json: boolean;
+  },
+  io: CliIo,
+): Promise<number> {
+  const { loadConfigDocumentFile } = await loadNodeModule();
+  const { auditConfig, formatAuditReport } = await loadAuditModule();
+  const document = await loadConfigDocumentFile(options.config);
+  if (options.network !== undefined) {
+    selectNetwork(document, options.network);
+  }
+  const report = auditConfig(document, {
+    strict: options.strict,
+    ...(options.network === undefined ? {} : { network: options.network }),
+  });
+  const exitCode = report.ok ? EXIT_OK : EXIT_NOT_SUPPORTED;
+  if (options.json) {
+    io.stdout(jsonLine({ ...report, config: options.config, exitCode }));
+  } else {
+    io.stdout(formatAuditReport(report, { table: options.table }));
+  }
+  return exitCode;
+}
+
+/** Compares two config files and reports structural differences. */
+async function diffCommand(
+  positionals: string[],
+  options: {
+    network: string | undefined;
+    strict: boolean;
+    json: boolean;
+  },
+  io: CliIo,
+): Promise<number> {
+  const [beforePath, afterPath, ...extra] = positionals;
+  if (beforePath === undefined || afterPath === undefined || extra.length > 0) {
+    throw new CliError('Usage: wasmward diff <before.json> <after.json> [--network <name>] [--strict] [--json]');
+  }
+  const { loadConfigDocumentFile } = await loadNodeModule();
+  const { diffConfigs, formatConfigDiff } = await loadAuditModule();
+  const beforeDoc = await loadConfigDocumentFile(beforePath);
+  const afterDoc = await loadConfigDocumentFile(afterPath);
+  const { config: beforeConfig } = selectNetwork(beforeDoc, options.network);
+  const { config: afterConfig } = selectNetwork(afterDoc, options.network);
+  const diff = diffConfigs(beforeConfig, afterConfig);
+  const exitCode = options.strict && diff.breaking ? EXIT_NOT_SUPPORTED : EXIT_OK;
+  if (options.json) {
+    io.stdout(jsonLine({ ...diff, before: beforePath, after: afterPath, exitCode }));
+  } else {
+    io.stdout(formatConfigDiff(diff));
+  }
+  return exitCode;
+}
+
 async function checkCommand(
-  options: { config: string; network: string | undefined; minTtlDays: string | undefined; json: boolean },
+  options: {
+    config: string;
+    network: string | undefined;
+    minTtlDays: string | undefined;
+    table: boolean;
+    prometheus: boolean;
+    json: boolean;
+  },
   io: CliIo,
 ): Promise<number> {
   const minTtl = parseMinTtl(options.minTtlDays);
@@ -683,6 +799,13 @@ async function checkCommand(
     const outcome = await checkNetwork(config, io, minTtl);
     if (options.json) {
       io.stdout(jsonLine({ ...outcome.report, exitCode: outcome.exitCode }));
+    } else if (options.prometheus) {
+      const { formatPrometheusMetrics } = await loadTelemetryModule();
+      io.stdout(formatPrometheusMetrics(outcome.report));
+    } else if (options.table) {
+      const { formatHealthTable } = await loadAuditModule();
+      io.stdout(formatHealthTable(outcome.report));
+      if (outcome.lookupFailed) io.stderr(LOOKUP_FAILED_NOTE);
     } else {
       io.stdout(outcome.text);
       if (outcome.lookupFailed) io.stderr(LOOKUP_FAILED_NOTE);
@@ -701,7 +824,9 @@ async function checkCommand(
     }
   }
   // 2 (could not check) outranks 1 (not supported), which outranks 0.
-  const exitCode = Math.max(...results.map((result) => (result.outcome === undefined ? EXIT_ERROR : result.outcome.exitCode)));
+  const exitCode = Math.max(
+    ...results.map((result) => (result.outcome === undefined ? EXIT_ERROR : result.outcome.exitCode)),
+  );
 
   if (options.json) {
     const networks: Record<string, unknown> = {};
@@ -713,11 +838,30 @@ async function checkCommand(
     }
     const ok = results.every((result) => result.outcome?.report.ok === true);
     io.stdout(jsonLine({ ok, exitCode, networks }));
+  } else if (options.prometheus) {
+    const { formatPrometheusMetrics } = await loadTelemetryModule();
+    for (const { name, outcome } of results) {
+      if (outcome !== undefined) {
+        io.stdout(formatPrometheusMetrics(outcome.report, { prefix: `wasmward_${name}` }));
+      }
+    }
+  } else if (options.table) {
+    const { formatHealthTable } = await loadAuditModule();
+    for (const { name, outcome, error } of results) {
+      io.stdout(
+        `== ${name} ==\n${outcome === undefined ? `could not be checked: ${error}\n` : formatHealthTable(outcome.report)}`,
+      );
+    }
+    if (results.some((result) => result.outcome === undefined || result.outcome.lookupFailed)) {
+      io.stderr(LOOKUP_FAILED_NOTE);
+    }
   } else {
     for (const { name, outcome, error } of results) {
       io.stdout(`== ${name} ==\n${outcome === undefined ? `could not be checked: ${error}\n` : outcome.text}`);
     }
-    if (results.some((result) => result.outcome === undefined || result.outcome.lookupFailed)) io.stderr(LOOKUP_FAILED_NOTE);
+    if (results.some((result) => result.outcome === undefined || result.outcome.lookupFailed)) {
+      io.stderr(LOOKUP_FAILED_NOTE);
+    }
   }
   return exitCode;
 }
@@ -742,8 +886,7 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
   const [command, ...rest] = positionals;
   if (values.version === true) {
     const version = io.version ?? 'unknown';
-    io.stdout(json ? jsonLine({ version }) : `wasmward ${version}
-`);
+    io.stdout(json ? jsonLine({ version }) : `wasmward ${version}\n`);
     return EXIT_OK;
   }
   if (values.help === true) {
@@ -759,6 +902,20 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
     if (values['min-ttl-days'] !== undefined && command !== 'check') {
       throw new CliError('--min-ttl-days only applies to check.');
     }
+    if (values.prometheus === true && command !== 'check') {
+      throw new CliError('--prometheus only applies to check.');
+    }
+    if (values.table === true && command !== 'check' && command !== 'audit') {
+      throw new CliError('--table only applies to check and audit.');
+    }
+    if (values.strict === true && command !== 'audit' && command !== 'diff') {
+      throw new CliError('--strict only applies to audit and diff.');
+    }
+    const formatCount = [values.json === true, values.table === true, values.prometheus === true].filter(Boolean).length;
+    if (formatCount > 1) {
+      throw new CliError('Choose at most one output format (--json, --table, or --prometheus).');
+    }
+
     const config = values.config ?? DEFAULT_CONFIG_PATH;
     switch (command) {
       case 'hash':
@@ -778,16 +935,51 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
           io,
         );
       case 'add':
-        return await addCommand(rest, { config, network: values.network, label: values.label, json: values.json === true }, io);
+        return await addCommand(
+          rest,
+          { config, network: values.network, label: values.label, json: values.json === true },
+          io,
+        );
       case 'remove':
         return await removeCommand(rest, { config, network: values.network, json: values.json === true }, io);
       case 'validate':
         if (rest.length > 0) throw new CliError('Usage: wasmward validate [--config <path>] [--json]');
         return await validateCommand({ config, json: values.json === true }, io);
+      case 'audit':
+        if (rest.length > 0) {
+          throw new CliError('Usage: wasmward audit [--config <path>] [--network <name>] [--strict] [--table] [--json]');
+        }
+        return await auditCommand(
+          {
+            config,
+            network: values.network,
+            strict: values.strict === true,
+            table: values.table === true,
+            json: values.json === true,
+          },
+          io,
+        );
+      case 'diff':
+        return await diffCommand(
+          rest,
+          {
+            network: values.network,
+            strict: values.strict === true,
+            json: values.json === true,
+          },
+          io,
+        );
       case 'check':
         if (rest.length > 0) throw new CliError('Usage: wasmward check [--config <path>] [--network <name>] [--json]');
         return await checkCommand(
-          { config, network: values.network, minTtlDays: values['min-ttl-days'], json: values.json === true },
+          {
+            config,
+            network: values.network,
+            minTtlDays: values['min-ttl-days'],
+            table: values.table === true,
+            prometheus: values.prometheus === true,
+            json: values.json === true,
+          },
           io,
         );
       case 'watch':
@@ -817,6 +1009,9 @@ function parseCommandLine(argv: string[]) {
       preset: { type: 'string' },
       'rpc-url': { type: 'string' },
       passphrase: { type: 'string' },
+      strict: { type: 'boolean' },
+      table: { type: 'boolean' },
+      prometheus: { type: 'boolean' },
       json: { type: 'boolean' },
       version: { type: 'boolean', short: 'v' },
       help: { type: 'boolean', short: 'h' },

@@ -2,11 +2,18 @@ import { rpc } from '@stellar/stellar-sdk';
 import { usesPlainHttp } from './config.js';
 import { ConfigError } from './errors.js';
 import { fetchExecutables, withTimeout, type LedgerEntriesSource } from './fetch.js';
+import type { EndpointCallRecord } from './telemetry.js';
 import type { LiveExecutable } from './types.js';
 
 /** The parts of `rpc.Server` the guard uses. `rpc.Server` satisfies it. */
 export interface GuardServer extends LedgerEntriesSource {
   getNetwork(): Promise<{ passphrase: string }>;
+}
+
+export interface EndpointSetOptions {
+  onEndpointCall?: ((event: EndpointCallRecord) => void) | undefined;
+  onFailover?: ((fromEndpoint: number, toEndpoint: number, at: number) => void) | undefined;
+  now?: (() => number) | undefined;
 }
 
 /**
@@ -46,6 +53,8 @@ export interface EndpointSet {
   lookup(contractIds: readonly string[], timeoutMs: number): Promise<Map<string, LiveExecutable>>;
   /** True when the most recent successful lookup came from a fallback rather than the primary. */
   readonly usingFallback: boolean;
+  /** Index of the active RPC endpoint (0 for primary, 1+ for fallbacks). */
+  readonly activeEndpointIndex: number;
 }
 
 function messageOf(error: unknown): string {
@@ -66,9 +75,11 @@ export function createEndpointSet(
   servers: readonly GuardServer[],
   passphrase: string,
   verifyTimeoutMs: number,
+  options: EndpointSetOptions = {},
 ): EndpointSet {
   if (servers.length === 0) throw new Error('createEndpointSet needs at least one server');
 
+  const clock = options.now ?? Date.now;
   const verified = new Set<number>();
   /** Endpoints that reported a different network. They are never used. */
   const rejected = new Map<number, string>();
@@ -88,12 +99,43 @@ export function createEndpointSet(
     // every later ask, or a retry would look like an outage and move on to a fallback.
     if (known !== undefined) throw new ConfigError(known);
     const server = servers[index] as GuardServer;
-    const actual = (await withTimeout(server.getNetwork(), verifyTimeoutMs, 'getNetwork')).passphrase;
+    const startedAt = clock();
+    let actual: string;
+    try {
+      actual = (await withTimeout(server.getNetwork(), verifyTimeoutMs, 'getNetwork')).passphrase;
+    } catch (error) {
+      const finishedAt = clock();
+      options.onEndpointCall?.({
+        endpointIndex: index,
+        kind: 'verify',
+        durationMs: Math.max(0, finishedAt - startedAt),
+        ok: false,
+        at: finishedAt,
+        error: messageOf(error),
+      });
+      throw error;
+    }
+    const finishedAt = clock();
     if (actual !== passphrase) {
       const message = wrongNetwork(index, actual);
       rejected.set(index, message);
+      options.onEndpointCall?.({
+        endpointIndex: index,
+        kind: 'verify',
+        durationMs: Math.max(0, finishedAt - startedAt),
+        ok: false,
+        at: finishedAt,
+        error: message,
+      });
       throw new ConfigError(message);
     }
+    options.onEndpointCall?.({
+      endpointIndex: index,
+      kind: 'verify',
+      durationMs: Math.max(0, finishedAt - startedAt),
+      ok: true,
+      at: finishedAt,
+    });
     verified.add(index);
   }
 
@@ -108,11 +150,18 @@ export function createEndpointSet(
       return usingFallback;
     },
 
+    get activeEndpointIndex(): number {
+      return preferred;
+    },
+
     async verifyNetwork(): Promise<void> {
       const failures: string[] = [];
       for (let index = 0; index < servers.length; index += 1) {
         try {
           await verifyOne(index);
+          if (index !== preferred) {
+            options.onFailover?.(preferred, index, clock());
+          }
           preferred = index;
           usingFallback = index !== 0;
           return;
@@ -132,8 +181,10 @@ export function createEndpointSet(
     async lookup(contractIds: readonly string[], timeoutMs: number): Promise<Map<string, LiveExecutable>> {
       lookups += 1;
       const failures: string[] = [];
+      const sequence = order();
+      const firstTried = sequence[0] ?? 0;
 
-      for (const index of order()) {
+      for (const index of sequence) {
         try {
           await verifyOne(index);
         } catch (error) {
@@ -141,15 +192,39 @@ export function createEndpointSet(
           continue;
         }
 
+        const startedAt = clock();
         const results = await fetchExecutables(servers[index] as GuardServer, contractIds, timeoutMs);
+        const finishedAt = clock();
+        const durationMs = Math.max(0, finishedAt - startedAt);
         const answered = [...results.values()].some((result) => result.kind !== 'error');
         if (answered || results.size === 0) {
+          options.onEndpointCall?.({
+            endpointIndex: index,
+            kind: 'lookup',
+            durationMs,
+            ok: true,
+            at: finishedAt,
+          });
+          if (index !== preferred || index !== firstTried) {
+            if (index !== 0 || preferred !== 0) {
+              options.onFailover?.(preferred, index, finishedAt);
+            }
+          }
           preferred = index;
           usingFallback = index !== 0;
           return results;
         }
         const first = [...results.values()].find((result) => result.kind === 'error');
-        failures.push(`endpoint ${index}: ${first?.kind === 'error' ? first.message : 'no answer'}`);
+        const errMessage = first?.kind === 'error' ? first.message : 'no answer';
+        options.onEndpointCall?.({
+          endpointIndex: index,
+          kind: 'lookup',
+          durationMs,
+          ok: false,
+          at: finishedAt,
+          error: errMessage,
+        });
+        failures.push(`endpoint ${index}: ${errMessage}`);
       }
 
       const message =

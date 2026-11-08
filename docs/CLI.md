@@ -17,6 +17,8 @@ Every command reads or writes a config file, `./wasmward.json` unless you pass `
 | [`add`](#add) | Adds a Wasm file's hash to a contract's supported list. | No |
 | [`remove`](#remove) | Takes a build off a contract's supported list. | No |
 | [`validate`](#validate) | Checks the config file alone. | No |
+| [`audit`](#audit) | Audits the config for operational, resilience, and security risks. | No |
+| [`diff`](#diff) | Compares two config files and reports structural differences. | No |
 | [`check`](#check) | Looks up what each contract runs now and reports its status. | Yes |
 | [`watch`](#watch) | Keeps checking and prints each status change. | Yes |
 
@@ -63,13 +65,29 @@ wasmward validate [--config <path>] [--json]
 
 Reads the config and either lists what is in it (networks, contracts, supported builds) or fails with every problem and its JSON path. It never contacts a network, so it suits a pre-commit hook. With `--json`: `{"ok": true, "config", "networks": [{"name"?, "rpcUrl", "contracts": [{"name", "contractId", "supported"}]}]}`; on failure `{"ok": false, "error", "exitCode": 2}`.
 
+### audit
+
+```bash
+wasmward audit [--config <path>] [--network <name>] [--strict] [--table] [--json]
+```
+
+Audits the config file for operational, resilience, and security best practices (such as missing fallback RPC endpoints, unlabelled builds, duplicate labels, shared contract IDs, high poll intervals, or cross-network drift) and computes a readiness score out of 100. Use `--strict` to exit 1 when warnings are present, or `--table` to format findings as an aligned ASCII table.
+
+### diff
+
+```bash
+wasmward diff <before.json> <after.json> [--network <name>] [--strict] [--json]
+```
+
+Compares two config files and reports added, removed, or modified contracts, rotated Wasm hashes, and network setting changes. Marks removed contracts, removed hashes, changed contract IDs, and changed passphrases as breaking; with `--strict`, breaking changes exit 1.
+
 ### check
 
 ```bash
-wasmward check [--config <path>] [--network <name>] [--min-ttl-days <days>] [--json]
+wasmward check [--config <path>] [--network <name>] [--min-ttl-days <days>] [--table] [--prometheus] [--json]
 ```
 
-Verifies the RPC serves the configured network, looks up the live code of every contract and prints its status. With a several-networks config and no `--network`, every network is checked, and one failing does not hide the others. `--min-ttl-days` also fails a supported contract with fewer than that many days left (fractions are fine). The days left are the smaller of the contract instance's and its Wasm code's, which expire separately.
+Verifies the RPC serves the configured network, looks up the live code of every contract and prints its status. With a several-networks config and no `--network`, every network is checked, and one failing does not hide the others. `--min-ttl-days` also fails a supported contract with fewer than that many days left (fractions are fine). The days left are the smaller of the contract instance's and its Wasm code's, which expire separately. Use `--table` for an aligned ASCII table or `--prometheus` for Prometheus text exposition format.
 
 With `--json` the output is the health report from `guard.health()` (see [API](API.md)) plus `exitCode`, `minTtlDays` when a minimum was given, and `belowMinTtl: true` on each contract that misses it. For several networks the object is `{"ok", "exitCode", "networks": {"<name>": {...}}}`.
 
@@ -85,14 +103,17 @@ Starts a guard and prints a line whenever a contract's status changes, until you
 
 | Option | Used by | Meaning |
 |---|---|---|
-| `--config <path>` | all but `hash` | The config file. Default `./wasmward.json`. |
-| `--network <name>` | `add`, `remove`, `check`, `watch` | Which network, for a config with a `networks` section. |
+| `--config <path>` | all but `hash` and `diff` | The config file. Default `./wasmward.json`. |
+| `--network <name>` | `add`, `remove`, `audit`, `diff`, `check`, `watch` | Which network, for a config with a `networks` section. |
 | `--label <label>` | `init`, `add` | Name for the build being added. `add` requires it; `init` defaults to `initial`. |
 | `--preset <name>` | `init` | `testnet` (public RPC included) or `mainnet` (give `--rpc-url`). |
 | `--rpc-url <url>` | `init` | The RPC endpoint. |
 | `--passphrase <text>` | `init` | The network passphrase, when not using `--preset`. |
 | `--wasm <file>` | `init` | Take the first supported hash from this build instead of the network. |
 | `--min-ttl-days <n>` | `check` | Also fail if a supported contract has fewer than `n` days left. |
+| `--strict` | `audit`, `diff` | Fail (exit 1) when `audit` finds warnings or `diff` finds breaking changes. |
+| `--table` | `check`, `audit` | Render human-readable output as an aligned ASCII table. |
+| `--prometheus` | `check` | Render health output in Prometheus text exposition format. |
 | `--json` | all | Machine-readable output: one JSON object (or one per line for `watch`). Errors become `{"ok": false, "error", "exitCode"}`. |
 | `-v`, `--version` | | Print the version and exit. |
 | `-h`, `--help` | | Print the help and exit. |
@@ -102,7 +123,7 @@ Starts a guard and prints a line whenever a contract's status changes, until you
 | Code | Meaning |
 |---|---|
 | `0` | Success. For `check`: every contract is supported (and has enough time left, with `--min-ttl-days`). For `watch`: stopped by Ctrl+C. |
-| `1` | `check` only: at least one contract is not supported, or is too close to expiring. |
+| `1` | `check`: at least one contract is not supported, or is too close to expiring. `audit` / `diff`: failed with `--strict` or audit errors. |
 | `2` | Invalid input, an unreadable file, an invalid config, or the network could not be checked. For `watch`, also if it cannot start. |
 
 When one `check` finds both a failure and a contract that could not be checked, the higher code wins: 2, then 1, then 0.

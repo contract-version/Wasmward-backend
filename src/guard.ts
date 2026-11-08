@@ -13,6 +13,15 @@ import {
   ledgersUntilExpiry,
   nextState,
 } from './state.js';
+import {
+  createMetricsCollector,
+  summarizeTelemetry,
+  type GuardDiagnostics,
+  type GuardMetrics,
+  type MetricsCollector,
+  type TelemetryHook,
+  type WriteCheckReason,
+} from './telemetry.js';
 import type { ContractConfig, ContractState, LiveExecutable, Status, WasmwardConfigInput } from './types.js';
 
 /** A single lookup waits at most this long, and never longer than one poll interval. */
@@ -31,6 +40,10 @@ export interface VersionGuardOptions {
   lookupTimeoutMs?: number;
   /** Uniform `[0, 1)` random source for poll jitter. Defaults to `Math.random`. */
   random?: () => number;
+  /** Custom telemetry and metrics collector. Defaults to a new in-memory collector. */
+  metrics?: MetricsCollector | undefined;
+  /** Optional hook invoked after each completed poll cycle. */
+  onPollCycle?: TelemetryHook | undefined;
 }
 
 export interface AssertWritableOptions {
@@ -69,6 +82,10 @@ export interface VersionGuard {
     options?: { fresh?: boolean; minTtlLedgers?: number },
   ): (...args: A) => Promise<Awaited<R>>;
   health(): HealthReport;
+  /** Returns a deep snapshot of collected telemetry and latency metrics. */
+  metrics(): GuardMetrics;
+  /** Returns combined health, metrics, and summarized operational diagnostics. */
+  diagnostics(): GuardDiagnostics;
 }
 
 function validateMinTtlLedgers(minTtlLedgers: number | undefined): void {
@@ -93,17 +110,20 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
     options.lookupTimeoutMs !== undefined
       ? Math.min(options.lookupTimeoutMs, config.pollIntervalMs)
       : Math.min(config.pollIntervalMs, MAX_LOOKUP_TIMEOUT_MS);
-  const endpoints = createEndpointSet(
-    [
-      options.server ?? createRpcClient(config.network.rpcUrl, lookupTimeoutMs),
-      ...(options.fallbackServers ?? config.network.fallbackRpcUrls.map((url) => createRpcClient(url, lookupTimeoutMs))),
-    ],
-    config.network.passphrase,
-    lookupTimeoutMs,
-  );
+  const collector = options.metrics ?? createMetricsCollector({ now });
+  const serverList = [
+    options.server ?? createRpcClient(config.network.rpcUrl, lookupTimeoutMs),
+    ...(options.fallbackServers ?? config.network.fallbackRpcUrls.map((url) => createRpcClient(url, lookupTimeoutMs))),
+  ];
+  const endpoints = createEndpointSet(serverList, config.network.passphrase, lookupTimeoutMs, {
+    now,
+    onEndpointCall: (event) => collector.recordEndpointCall(event),
+    onFailover: (fromEndpoint, toEndpoint, at) => collector.recordFailover(fromEndpoint, toEndpoint, at),
+  });
 
   // A Map, not the config object, so names like "constructor" are never found by inheritance.
   const contracts = new Map<string, ContractConfig>(Object.entries(config.contracts));
+  collector.initFleet(serverList.length, contracts);
   const states = new Map<string, ContractState>();
   /** The status subscribers were last told about, so a change is reported once. */
   const reported = new Map<string, Status>();
@@ -165,7 +185,9 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
   }
 
   function emit(changes: StatusChange[]): void {
+    const at = now();
     for (const change of changes) {
+      collector.recordTransition(change, at);
       for (const listener of [...listeners]) {
         try {
           // A listener that throws or rejects must never stop the poller or other listeners.
@@ -228,6 +250,22 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
       apply(name, result, startedAt);
     }
     publish(contracts.keys());
+    const completedAt = now();
+    const cycleEvent = collector.recordPollCycle(states.values(), {
+      startedAt,
+      completedAt,
+      endpointIndex: endpoints.activeEndpointIndex,
+      usingFallback: endpoints.usingFallback,
+      everyLookupFailed,
+      maxStalenessMs,
+    });
+    if (options.onPollCycle !== undefined) {
+      try {
+        void Promise.resolve(options.onPollCycle(cycleEvent)).catch(() => undefined);
+      } catch {
+        // A throwing telemetry hook must never stop the poller.
+      }
+    }
     return everyLookupFailed;
   }
 
@@ -252,24 +290,59 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
   function assertWritable(name: string, assertOptions?: AssertWritableOptions): void {
     const state = stateFor(name);
     validateMinTtlLedgers(assertOptions?.minTtlLedgers);
-    if (!networkVerified) throw blocked(name, 'the guard has not been started, so the network is not verified');
-    if (!isWritable(state, now(), maxStalenessMs)) throw blocked(name);
+    const at = now();
+    const currentStatus = effectiveStatus(state, at, maxStalenessMs);
+    if (!networkVerified) {
+      collector.recordWriteCheck(name, state.contractId, {
+        allowed: false,
+        reason: 'not-started',
+        status: currentStatus,
+      });
+      throw blocked(name, 'the guard has not been started, so the network is not verified');
+    }
+    if (!isWritable(state, at, maxStalenessMs)) {
+      const reason: WriteCheckReason = currentStatus === 'supported' ? 'stale' : currentStatus;
+      collector.recordWriteCheck(name, state.contractId, {
+        allowed: false,
+        reason,
+        status: currentStatus,
+      });
+      throw blocked(name);
+    }
     if (assertOptions?.minTtlLedgers !== undefined) {
       const remaining = ledgersUntilExpiry(state);
       if (remaining !== undefined && remaining < assertOptions.minTtlLedgers) {
         const which = expiringEntry(state) === 'code' ? 'Wasm code' : 'instance';
+        collector.recordWriteCheck(name, state.contractId, {
+          allowed: false,
+          reason: 'below-min-ttl',
+          status: currentStatus,
+        });
         throw blocked(
           name,
           `${which} expires in ${remaining} ledgers (${describeTimeLeft(remaining)}), below the required minimum of ${assertOptions.minTtlLedgers} ledgers`,
         );
       }
     }
+    collector.recordWriteCheck(name, state.contractId, {
+      allowed: true,
+      reason: 'allowed',
+      status: currentStatus,
+    });
   }
 
   async function assertWritableFresh(name: string, assertOptions?: AssertWritableOptions): Promise<void> {
     const contract = contractFor(name);
     validateMinTtlLedgers(assertOptions?.minTtlLedgers);
-    if (!networkVerified) throw blocked(name, 'the guard has not been started, so the network is not verified');
+    if (!networkVerified) {
+      const state = stateFor(name);
+      collector.recordWriteCheck(name, contract.contractId, {
+        allowed: false,
+        reason: 'not-started',
+        status: effectiveStatus(state, now(), maxStalenessMs),
+      });
+      throw blocked(name, 'the guard has not been started, so the network is not verified');
+    }
     const startedAt = now();
     const result =
       (await endpoints.lookup([contract.contractId], lookupTimeoutMs)).get(contract.contractId) ??
@@ -277,9 +350,25 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
     apply(name, result, startedAt);
     publish([name]);
     if (result.kind === 'error') {
+      const state = stateFor(name);
+      collector.recordWriteCheck(name, contract.contractId, {
+        allowed: false,
+        reason: 'fresh-lookup-failed',
+        status: effectiveStatus(state, now(), maxStalenessMs),
+      });
       throw blocked(name, `the live code could not be checked just now (${result.message})`);
     }
     assertWritable(name, assertOptions);
+  }
+
+  function computeHealth(): HealthReport {
+    return buildHealth(states.values(), {
+      passphrase: config.network.passphrase,
+      networkVerified,
+      usingFallback: endpoints.usingFallback,
+      now: now(),
+      maxStalenessMs,
+    });
   }
 
 
@@ -357,13 +446,23 @@ export function createVersionGuard(input: WasmwardConfigInput, options: VersionG
     },
 
     health(): HealthReport {
-      return buildHealth(states.values(), {
-        passphrase: config.network.passphrase,
-        networkVerified,
-        usingFallback: endpoints.usingFallback,
-        now: now(),
-        maxStalenessMs,
-      });
+      return computeHealth();
+    },
+
+    metrics(): GuardMetrics {
+      return collector.snapshot(now());
+    },
+
+    diagnostics(): GuardDiagnostics {
+      const healthReport = computeHealth();
+      const metricsSnapshot = collector.snapshot(healthReport.checkedAt);
+      const summary = summarizeTelemetry(metricsSnapshot, healthReport);
+      return {
+        ok: healthReport.ok,
+        health: healthReport,
+        metrics: metricsSnapshot,
+        summary,
+      };
     },
   };
 }

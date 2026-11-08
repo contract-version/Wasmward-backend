@@ -453,4 +453,77 @@ describe('check', () => {
       liveWasmHash: V1,
     });
   });
+
+  it('supports --table and --prometheus on check', async () => {
+    const config = await configFile();
+    const tableRes = await run(['check', '--table', '--config', config]);
+    expect(tableRes.code).toBe(EXIT_OK);
+    expect(tableRes.out).toContain('| CONTRACT');
+    expect(tableRes.out).toContain('| vault');
+
+    const promRes = await run(['check', '--prometheus', '--config', config]);
+    expect(promRes.code).toBe(EXIT_OK);
+    expect(promRes.out).toContain('# TYPE wasmward_guard_ok gauge');
+    expect(promRes.out).toContain('wasmward_guard_ok 1');
+  });
+});
+
+describe('audit and diff commands', () => {
+  it('audits a config file in default, --table, --json, and --strict modes', async () => {
+    const config = await configFile();
+    const normal = await run(['audit', '--config', config]);
+    expect(normal.code).toBe(EXIT_OK);
+    expect(normal.out).toContain('single-rpc-endpoint');
+
+    const strict = await run(['audit', '--strict', '--config', config]);
+    expect(strict.code).toBe(EXIT_NOT_SUPPORTED);
+
+    const table = await run(['audit', '--table', '--config', config]);
+    expect(table.code).toBe(EXIT_OK);
+    expect(table.out).toContain('| SEVERITY');
+
+    const json = await run(['audit', '--json', '--strict', '--config', config]);
+    expect(json.code).toBe(EXIT_NOT_SUPPORTED);
+    expect(JSON.parse(json.out)).toMatchObject({
+      ok: false,
+      exitCode: 1,
+      warningCount: 1,
+    });
+  });
+
+  it('diffs two config files in default, --json, and --strict modes', async () => {
+    const before = await configFile();
+    const after = await configFile({
+      ...baseConfig(),
+      contracts: {
+        vault: { contractId: VAULT, supported: [{ wasmHash: V2, label: 'v2.0.0' }] },
+      },
+    });
+
+    const normal = await run(['diff', before, after]);
+    expect(normal.code).toBe(EXIT_OK);
+    expect(normal.out).toContain('[BREAKING]');
+
+    const strict = await run(['diff', before, after, '--strict']);
+    expect(strict.code).toBe(EXIT_NOT_SUPPORTED);
+
+    const json = await run(['diff', before, after, '--json']);
+    expect(json.code).toBe(EXIT_OK);
+    expect(JSON.parse(json.out)).toMatchObject({
+      identical: false,
+      breaking: true,
+      modifiedContracts: ['vault'],
+      exitCode: 0,
+    });
+  });
+
+  it('validates flag combinations for --table, --prometheus, and --strict', async () => {
+    const config = await configFile();
+    expect((await run(['validate', '--table', '--config', config])).code).toBe(EXIT_ERROR);
+    expect((await run(['validate', '--prometheus', '--config', config])).code).toBe(EXIT_ERROR);
+    expect((await run(['validate', '--strict', '--config', config])).code).toBe(EXIT_ERROR);
+    expect((await run(['check', '--json', '--table', '--config', config])).code).toBe(EXIT_ERROR);
+    expect((await run(['audit', 'extra', '--config', config])).code).toBe(EXIT_ERROR);
+    expect((await run(['diff', config])).code).toBe(EXIT_ERROR);
+  });
 });

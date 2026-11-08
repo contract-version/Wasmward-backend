@@ -690,4 +690,19 @@ describe('advanced guard settings', () => {
     await guard.start();
     expect(guard.isWritable('vault')).toBe(true);
   });
+
+  it('exposes metrics() and diagnostics() on the guard instance', async () => {
+    const guard = await started();
+    guard.assertWritable('vault');
+    const metrics = guard.metrics();
+    expect(metrics.totalPolls).toBe(1);
+    expect(metrics.allowedWriteChecks).toBe(1);
+    expect(metrics.contracts['vault']?.currentStatus).toBe('supported');
+
+    const diagnostics = guard.diagnostics();
+    expect(diagnostics.ok).toBe(true);
+    expect(diagnostics.summary.pollSuccessRate).toBe(1);
+    expect(diagnostics.summary.writeAllowRate).toBe(1);
+    expect(diagnostics.summary.unhealthyContracts).toEqual([]);
+  });
 });
