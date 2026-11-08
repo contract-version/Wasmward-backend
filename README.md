@@ -75,8 +75,11 @@ npx wasmward hash build/contract.wasm                    # print a Wasm file's S
 npx wasmward add vault build/contract.wasm --label v2    # add it to wasmward.json
 npx wasmward remove vault v1                             # take a build off the list (never the last one)
 npx wasmward validate                                    # check wasmward.json alone, no network needed
+npx wasmward audit --strict                              # audit wasmward.json for operational/resilience risks
+npx wasmward diff old.wasmward.json wasmward.json        # compare two configs for breaking changes
 npx wasmward check                                       # exit 0 only if every contract is supported
 npx wasmward check --min-ttl-days 3                      # ...and none expires within 3 days
+npx wasmward check --prometheus                          # export health check metrics in Prometheus format
 npx wasmward watch                                       # print each status change until Ctrl+C
 ```
 
@@ -114,7 +117,9 @@ The step's result is the command's exit code (0 all supported, 1 something unsup
 |---|---|
 | `loadConfig(object)` | Validate a config and apply defaults. `loadConfigFile(path)` is in `@wasmward/core/node`. |
 | `hashWasm(bytes)` | SHA-256 of Wasm bytes, equal to the hash Stellar assigns on upload. |
-| `createVersionGuard(config)` | The guard: `start`, `stop`, `status`, `isWritable`, `assertWritable`, `assertWritableFresh`, `guard`, `subscribe`, `health`. |
+| `createVersionGuard(config)` | The guard: `start`, `stop`, `status`, `isWritable`, `assertWritable`, `assertWritableFresh`, `guard`, `subscribe`, `health`, `metrics`, `diagnostics`. |
+| `auditConfig`, `diffConfigs`, `validateUpgradePlan` | Operational config audit, structured config diffing, and zero-downtime upgrade plan validation. |
+| `createMetricsCollector`, `formatPrometheusMetrics` | In-memory RPC latency/failover telemetry collector and Prometheus text exposition formatter. |
 | `WriteBlockedError`, `ConfigError` | What the guard throws. |
 
 Only the `supported` status allows writes. See [docs/API.md](docs/API.md) for every export.

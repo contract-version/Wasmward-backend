@@ -434,3 +434,13 @@
 - Backend: 759 tests pass (99 new), 99.66% lines; typecheck, lint and build clean. One full run failed a `watch` test that waits for the SDK to load on a busy machine; it passes alone and the waits now allow 30 seconds.
 - Contract: 195 script tests pass. Run against live testnet: `live-build.mjs --expect v1` exits 0 and `--expect v2` exits 1; the real CLI accepts the config with `$schema` and `check --min-ttl-days 3` still passes (about 25 days left).
 - Frontend: 387 tests pass. In the browser pane against live testnet at 375px wide: no horizontal scroll, badge `supported`, short address shown.
+
+## Extra: telemetry, Prometheus metrics, config auditing, diffing, and upgrade validation
+
+**Date:** 2026-11-08
+
+**Built**
+- `src/telemetry.ts`: `createMetricsCollector`, `summarizeTelemetry`, and `formatPrometheusMetrics` tracking per-endpoint request counts, latency quantiles (`p50`, `p95`, `p99`), failover events, status transition history, TTL warning trends, and write-guard outcomes by reason.
+- `src/guard.ts` & `src/endpoints.ts`: wired `metrics?: MetricsCollector` and `onPollCycle?: TelemetryHook` into `VersionGuardOptions`, plus `guard.metrics()` and `guard.diagnostics()` on `VersionGuard`, and `activeEndpointIndex` on `EndpointSet`.
+- `src/audit.ts`: `auditConfig`, `diffConfigs`, `validateUpgradePlan`, `summarizeHealthReport`, `formatHealthTable`, `formatAuditReport`, and `formatConfigDiff`.
+- `src/cli-core.ts` & `docs/CLI.md`: added `wasmward audit`, `wasmward diff`, and `--strict`, `--table`, and `--prometheus` flags.
