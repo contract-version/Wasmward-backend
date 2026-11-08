@@ -30,7 +30,7 @@ const config = loadConfig({
   },
   contracts: {
     vault: {
-      contractId: 'CBR5ZFDI2GBXG66DAEWWHSAK4NDLKSKHWVUEUSOM4UOBM66TI6DYPDPV',
+      contractId: 'CD23JAK5WMRFWGOYUCU25JNWAPWWHI6Y2YCK5XANP4MK3JHIOAHEHCHN',
       supported: [
         {
           wasmHash: 'a7a82511fa284650178b02fe3a4bafc587b95212f2f8ce647f2df5ef4cf42509',
